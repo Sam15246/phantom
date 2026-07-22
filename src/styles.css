@@ -157,3 +157,56 @@ html, body {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
 }
+
+/* --- highlight.js dark theme --- */
+.hljs {
+  background: transparent !important;
+  color: var(--text-primary);
+}
+.hljs-keyword { color: #c586c0; }
+.hljs-string { color: #ce9178; }
+.hljs-number { color: #b5cea8; }
+.hljs-comment { color: #6a9955; font-style: italic; }
+.hljs-function { color: #dcdcaa; }
+.hljs-title { color: #dcdcaa; }
+.hljs-built_in { color: #4ec9b0; }
+.hljs-type { color: #4ec9b0; }
+.hljs-params { color: #9cdcfe; }
+.hljs-attr { color: #9cdcfe; }
+.hljs-literal { color: #569cd6; }
+
+/* --- Follow-up input --- */
+#follow-up {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  border-radius: 0 0 8px 8px;
+}
+
+#follow-up-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+#follow-up-input::placeholder {
+  color: var(--text-secondary);
+}
+
+#follow-up-input:focus {
+  border-color: rgba(200, 184, 138, 0.3);
+}
+
+/* --- Pipeline status --- */
+.pipeline-status {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: italic;
+  padding: 8px 0;
+}
