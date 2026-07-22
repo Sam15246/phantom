@@ -99,8 +99,8 @@ fn decrypt(data: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Decryption error: {e}"))
 }
 
-#[tauri::command]
-pub fn load_config() -> Result<PhantomConfig, String> {
+/// Internal (non-command) version for use from async pipeline code.
+pub fn load_config_internal() -> Result<PhantomConfig, String> {
     let path = config_path();
     if !path.exists() {
         return Ok(PhantomConfig::default());
@@ -109,6 +109,11 @@ pub fn load_config() -> Result<PhantomConfig, String> {
     let encrypted = fs::read(&path).map_err(|e| format!("Read error: {e}"))?;
     let decrypted = decrypt(&encrypted)?;
     serde_json::from_slice(&decrypted).map_err(|e| format!("Parse error: {e}"))
+}
+
+#[tauri::command]
+pub fn load_config() -> Result<PhantomConfig, String> {
+    load_config_internal()
 }
 
 #[tauri::command]
