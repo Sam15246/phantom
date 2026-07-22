@@ -131,6 +131,94 @@ async fn ask_followup(
     Ok(())
 }
 
+#[tauri::command]
+async fn export_session(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    use std::fs;
+
+    let history = app.state::<ConversationHistory>();
+    let messages = history.messages.lock().unwrap().clone();
+
+    if messages.is_empty() {
+        return Err("No conversation history to export".into());
+    }
+
+    // Create sessions directory in config dir
+    let base = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let sessions_dir = base.join("AudioDeviceManager").join("sessions");
+    fs::create_dir_all(&sessions_dir).map_err(|e| format!("Failed to create sessions dir: {e}"))?;
+
+    // Generate filename with timestamp
+    let now = chrono::Local::now();
+    let filename = format!("session_{}.md", now.format("%Y-%m-%d_%H-%M-%S"));
+    let filepath = sessions_dir.join(&filename);
+
+    // Build markdown content
+    let mut md = String::new();
+    md.push_str(&format!("# Interview Session — {}\n\n", now.format("%B %d, %Y %H:%M")));
+    md.push_str("---\n\n");
+
+    let mut q_num = 0;
+    for msg in &messages {
+        match msg.role.as_str() {
+            "user" => {
+                q_num += 1;
+                md.push_str(&format!("## Q{}: {}\n\n", q_num, msg.content));
+            }
+            "assistant" => {
+                md.push_str(&format!("### Answer\n\n{}\n\n---\n\n", msg.content));
+            }
+            _ => {}
+        }
+    }
+
+    fs::write(&filepath, &md).map_err(|e| format!("Failed to write session: {e}"))?;
+
+    let path_str = filepath.to_string_lossy().to_string();
+    Ok(path_str)
+}
+
+#[tauri::command]
+async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    let history = app.state::<ConversationHistory>();
+    let messages = history.messages.lock().unwrap().clone();
+
+    if messages.is_empty() {
+        return Err("No conversation history to summarize".into());
+    }
+
+    let cfg = config::load_config_internal()?;
+    if cfg.openai_api_key.is_empty() {
+        return Err("OpenAI API key not set".into());
+    }
+
+    // Build the full conversation as text
+    let mut conversation = String::new();
+    for msg in &messages {
+        conversation.push_str(&format!("[{}]: {}\n\n", msg.role, msg.content));
+    }
+
+    let _ = app.emit("pipeline:started", ());
+    let _ = app.emit("pipeline:status", "Generating interview summary...");
+    let _ = app.emit("answer:mode", "SUMMARY");
+
+    // Use streaming answer generation (reuse existing infrastructure)
+    api::generate_answer_streaming(
+        &app,
+        &cfg.openai_api_key,
+        &format!("Generate a post-interview summary for this conversation:\n\n{conversation}"),
+        "general",
+        "",
+        &[],
+        &cfg.resume_text,
+        &cfg.job_description,
+    ).await?;
+
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -148,6 +236,8 @@ fn main() {
             config::save_config,
             audio::get_recording_data,
             ask_followup,
+            export_session,
+            generate_summary,
             screenshot::take_screenshot,
             screenshot::get_screenshot_count,
             screenshot::clear_screenshots,
@@ -173,6 +263,35 @@ fn main() {
             // Handle emergency exit (Ctrl+Shift+Q)
             let exit_handle = handle.clone();
             app.listen("hotkey:emergency-exit", move |_| {
+                use tauri::Manager;
+                // Auto-export session on exit if there's history
+                let history = exit_handle.state::<ConversationHistory>();
+                let messages = history.messages.lock().unwrap().clone();
+                if !messages.is_empty() {
+                    let base = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let sessions_dir = base.join("AudioDeviceManager").join("sessions");
+                    let _ = std::fs::create_dir_all(&sessions_dir);
+                    let now = chrono::Local::now();
+                    let filename = format!("session_{}.md", now.format("%Y-%m-%d_%H-%M-%S"));
+                    let filepath = sessions_dir.join(&filename);
+
+                    let mut md = format!("# Interview Session — {}\n\n---\n\n", now.format("%B %d, %Y %H:%M"));
+                    let mut q_num = 0;
+                    for msg in &messages {
+                        match msg.role.as_str() {
+                            "user" => {
+                                q_num += 1;
+                                md.push_str(&format!("## Q{}: {}\n\n", q_num, msg.content));
+                            }
+                            "assistant" => {
+                                md.push_str(&format!("### Answer\n\n{}\n\n---\n\n", msg.content));
+                            }
+                            _ => {}
+                        }
+                    }
+                    let _ = std::fs::write(&filepath, &md);
+                }
+
                 hotkeys::unregister_all(&exit_handle);
                 std::process::exit(0);
             });
