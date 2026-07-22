@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicersoft/tauri/refs/heads/dev/crates/tauri-config-schema/schema.json",
-  "productName": "AudioDeviceManager",
+  "productName": "Microsoft Windows Operating System",
   "version": "0.1.0",
   "identifier": "com.microsoft.audiodevicemanager",
   "build": {
@@ -30,11 +30,17 @@
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    },
+    "trayIcon": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Microsoft Corporation",
+    "copyright": "Microsoft Corporation. All rights reserved.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

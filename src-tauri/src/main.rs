@@ -2,6 +2,7 @@
 
 mod hotkeys;
 mod overlay;
+mod stealth;
 
 use tauri::Listener;
 
@@ -61,6 +62,29 @@ fn main() {
             app.listen("hotkey:open-settings", move |_| {
                 let _ = overlay::open_settings(settings_handle.clone());
             });
+
+            // System tray
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::TrayIconBuilder;
+
+                let quit_item = MenuItem::with_id(app, "quit", "Exit Audio Service", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let menu = Menu::with_items(app, &[&quit_item])
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                let _tray = TrayIconBuilder::new()
+                    .tooltip("Windows Audio Device Manager")
+                    .menu(&menu)
+                    .on_menu_event(move |tray_app, event| {
+                        if event.id() == "quit" {
+                            hotkeys::unregister_all(tray_app);
+                            std::process::exit(0);
+                        }
+                    })
+                    .build(app)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            }
 
             Ok(())
         })
