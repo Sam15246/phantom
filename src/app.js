@@ -216,6 +216,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     resetStatus();
   });
 
+  // Screenshot events
+  await listen('screenshot:taken', (event) => {
+    const count = event.payload;
+    const countEl = document.getElementById('screenshot-count');
+    countEl.textContent = 'SS: ' + count;
+    countEl.style.display = 'inline';
+  });
+
+  await listen('screenshot:error', (event) => {
+    console.error('Screenshot error:', event.payload);
+  });
+
   await listen('session:cleared', () => {
     currentAnswer = '';
     conversationHistory = [];
@@ -223,6 +235,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       '<p class="placeholder-text">Session cleared. Press Ctrl+Shift+Y to start recording</p>';
     document.getElementById('quick-actions').style.display = 'none';
     document.getElementById('follow-up').style.display = 'none';
+    document.getElementById('screenshot-count').style.display = 'none';
     document.getElementById('mode-label').textContent = 'General';
     resetStatus();
   });
