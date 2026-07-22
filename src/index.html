@@ -17,11 +17,16 @@
       <p class="placeholder-text">Press Ctrl+Shift+Y to start recording</p>
     </div>
     <div id="quick-actions" style="display:none">
-      <button id="btn-copy">Copy</button>
-      <button id="btn-copy-code">Copy Code</button>
-      <button id="btn-bullets">Bullets</button>
+      <button id="btn-copy" onclick="copyAnswer()">Copy</button>
+      <button id="btn-copy-code" onclick="copyCode()">Copy Code</button>
+    </div>
+    <div id="follow-up" style="display:none">
+      <input type="text" id="follow-up-input" placeholder="Ask a follow-up..." />
     </div>
   </div>
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/highlight.min.js"></script>
+  <script src="lib/purify.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
