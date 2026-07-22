@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audio Device Properties</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="overlay">
+    <div id="status-bar">
+      <span id="status-indicator">● Ready</span>
+      <span id="recording-timer" style="display:none">0:00</span>
+      <span id="mode-label">General</span>
+    </div>
+    <div id="answer-box">
+      <p class="placeholder-text">Press Ctrl+Shift+Y to start recording</p>
+    </div>
+    <div id="quick-actions" style="display:none">
+      <button id="btn-copy">Copy</button>
+      <button id="btn-copy-code">Copy Code</button>
+      <button id="btn-bullets">Bullets</button>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

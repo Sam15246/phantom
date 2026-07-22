@@ -1,0 +1,17 @@
+C:\Dev\computerApplication\phantom\src-tauri\target\release\deps\phantom.d: src\main.rs C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out/54ea8a41c70847545b6301bf53bd270ff80624f980e1a36b364edbcf136bbf85 C:\Dev\computerApplication\phantom\src-tauri\../src\app.js \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\e29e2acf55badddfaf2b735ec71bd6b9ddaa28f2c2d95d9963957afd02a4fa18.js C:\Dev\computerApplication\phantom\src-tauri\../src\index.html \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\c5a9644780c9e199390836db7f5a85006e21d1405a7181cae873452b34f41071.html C:\Dev\computerApplication\phantom\src-tauri\../src\styles.css \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\485488ef109de75c8d91d717a38698fe06ed825c54b7d5301649c1b2cdeee852.css
+
+C:\Dev\computerApplication\phantom\src-tauri\target\release\deps\phantom.exe: src\main.rs C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out/54ea8a41c70847545b6301bf53bd270ff80624f980e1a36b364edbcf136bbf85 C:\Dev\computerApplication\phantom\src-tauri\../src\app.js \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\e29e2acf55badddfaf2b735ec71bd6b9ddaa28f2c2d95d9963957afd02a4fa18.js C:\Dev\computerApplication\phantom\src-tauri\../src\index.html \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\c5a9644780c9e199390836db7f5a85006e21d1405a7181cae873452b34f41071.html C:\Dev\computerApplication\phantom\src-tauri\../src\styles.css \\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\485488ef109de75c8d91d717a38698fe06ed825c54b7d5301649c1b2cdeee852.css
+
+src\main.rs:
+C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out/54ea8a41c70847545b6301bf53bd270ff80624f980e1a36b364edbcf136bbf85:
+C:\Dev\computerApplication\phantom\src-tauri\../src\app.js:
+\\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\e29e2acf55badddfaf2b735ec71bd6b9ddaa28f2c2d95d9963957afd02a4fa18.js:
+C:\Dev\computerApplication\phantom\src-tauri\../src\index.html:
+\\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\c5a9644780c9e199390836db7f5a85006e21d1405a7181cae873452b34f41071.html:
+C:\Dev\computerApplication\phantom\src-tauri\../src\styles.css:
+\\?\C:\Dev\computerApplication\phantom\src-tauri\target\release\build\phantom-4d4c049c5ffa9810\out\tauri-codegen-assets\485488ef109de75c8d91d717a38698fe06ed825c54b7d5301649c1b2cdeee852.css:
+
+# env-dep:CARGO_PKG_AUTHORS=
+# env-dep:CARGO_PKG_DESCRIPTION=
+# env-dep:CARGO_PKG_NAME=phantom
+# env-dep:OUT_DIR=C:\\Dev\\computerApplication\\phantom\\src-tauri\\target\\release\\build\\phantom-4d4c049c5ffa9810\\out
