@@ -1,16 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
 mod config;
 mod hotkeys;
 mod overlay;
 mod stealth;
 
-use tauri::Listener;
+use tauri::{Emitter, Listener};
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(audio::AudioEngine::new())
+        .manage(audio::RecordingStore::new())
         .invoke_handler(tauri::generate_handler![
             overlay::set_click_through,
             overlay::toggle_overlay_visibility,
@@ -18,6 +21,7 @@ fn main() {
             overlay::open_settings,
             config::load_config,
             config::save_config,
+            audio::get_recording_data,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -65,6 +69,32 @@ fn main() {
             app.listen("hotkey:open-settings", move |_| {
                 let _ = overlay::open_settings(settings_handle.clone());
             });
+
+            // Handle toggle recording (Ctrl+Shift+Y)
+            {
+                use tauri::Manager;
+                let rec_handle = handle.clone();
+                app.listen("hotkey:toggle-recording", move |_| {
+                    let engine = rec_handle.state::<audio::AudioEngine>();
+                    let store = rec_handle.state::<audio::RecordingStore>();
+
+                    if engine.is_recording.load(std::sync::atomic::Ordering::SeqCst) {
+                        let wav_bytes = engine.stop_recording();
+                        let byte_count = wav_bytes.len();
+                        *store.data.lock().unwrap() = Some(wav_bytes);
+                        let _ = rec_handle.emit("recording:stopped", byte_count);
+                    } else {
+                        match engine.start_recording() {
+                            Ok(()) => {
+                                let _ = rec_handle.emit("recording:started", ());
+                            }
+                            Err(e) => {
+                                let _ = rec_handle.emit("recording:error", e);
+                            }
+                        }
+                    }
+                });
+            }
 
             // System tray
             {
