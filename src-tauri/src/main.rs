@@ -5,6 +5,7 @@ mod audio;
 mod config;
 mod hotkeys;
 mod overlay;
+mod screenshot;
 mod stealth;
 
 use tauri::{Emitter, Listener};
@@ -137,6 +138,7 @@ fn main() {
         .manage(audio::AudioEngine::new())
         .manage(audio::RecordingStore::new())
         .manage(ConversationHistory::new())
+        .manage(screenshot::ScreenshotQueue::new())
         .invoke_handler(tauri::generate_handler![
             overlay::set_click_through,
             overlay::toggle_overlay_visibility,
@@ -146,6 +148,9 @@ fn main() {
             config::save_config,
             audio::get_recording_data,
             ask_followup,
+            screenshot::take_screenshot,
+            screenshot::get_screenshot_count,
+            screenshot::clear_screenshots,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -238,6 +243,92 @@ fn main() {
                 *history.last_mode.lock().unwrap() = "general".to_string();
                 let _ = clear_handle.emit("session:cleared", ());
             });
+
+            // Handle screenshot capture (Ctrl+Shift+S)
+            {
+                use tauri::Manager;
+                let ss_handle = handle.clone();
+                app.listen("hotkey:screenshot", move |_| {
+                    let queue = ss_handle.state::<screenshot::ScreenshotQueue>();
+                    match screenshot::capture_screen(&ss_handle) {
+                        Ok(png_bytes) => {
+                            let mut q = queue.queue.lock().unwrap();
+                            q.push(png_bytes);
+                            let count = q.len();
+                            let _ = ss_handle.emit("screenshot:taken", count);
+                        }
+                        Err(e) => {
+                            let _ = ss_handle.emit("screenshot:error", &e);
+                        }
+                    }
+                });
+            }
+
+            // Handle analyze screenshots (Ctrl+Shift+A)
+            {
+                use tauri::Manager;
+                let analyze_handle = handle.clone();
+                app.listen("hotkey:analyze", move |_| {
+                    let ah = analyze_handle.clone();
+                    let queue = ah.state::<screenshot::ScreenshotQueue>();
+                    let screenshots_b64 = screenshot::get_screenshots_base64(queue.inner());
+
+                    if screenshots_b64.is_empty() {
+                        let _ = ah.emit("pipeline:error", "No screenshots captured. Press Ctrl+Shift+S to take screenshots first.");
+                        return;
+                    }
+
+                    tauri::async_runtime::spawn(async move {
+                        let _ = ah.emit("pipeline:started", ());
+                        let _ = ah.emit("pipeline:status", "Analyzing screenshots...");
+
+                        let cfg = match config::load_config_internal() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let _ = ah.emit("pipeline:error", &format!("Config error: {e}"));
+                                return;
+                            }
+                        };
+
+                        if cfg.openai_api_key.is_empty() {
+                            let _ = ah.emit("pipeline:error", "OpenAI API key not set. Press Ctrl+Shift+, to open settings.");
+                            return;
+                        }
+
+                        let queue = ah.state::<screenshot::ScreenshotQueue>();
+                        let screenshots_b64 = screenshot::get_screenshots_base64(queue.inner());
+
+                        match api::analyze_screenshots(
+                            &ah,
+                            &cfg.openai_api_key,
+                            &screenshots_b64,
+                            &cfg.resume_text,
+                            &cfg.job_description,
+                        )
+                        .await
+                        {
+                            Ok(answer) => {
+                                let history = ah.state::<ConversationHistory>();
+                                *history.last_mode.lock().unwrap() = "OA".to_string();
+                                history.messages.lock().unwrap().push(api::ChatMessage {
+                                    role: "user".to_string(),
+                                    content: format!(
+                                        "[Screenshot analysis of {} image(s)]",
+                                        screenshots_b64.len()
+                                    ),
+                                });
+                                history.messages.lock().unwrap().push(api::ChatMessage {
+                                    role: "assistant".to_string(),
+                                    content: answer,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = ah.emit("pipeline:error", &format!("Analysis error: {e}"));
+                            }
+                        }
+                    });
+                });
+            }
 
             // System tray
             {
