@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config;
 mod hotkeys;
 mod overlay;
 mod stealth;
@@ -15,6 +16,8 @@ fn main() {
             overlay::toggle_overlay_visibility,
             overlay::move_overlay,
             overlay::open_settings,
+            config::load_config,
+            config::save_config,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

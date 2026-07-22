@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Audio Device Properties</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1e1d1b;
+      color: #b0ada4;
+      padding: 20px;
+      font-size: 13px;
+    }
+    h2 {
+      color: #c8b88a;
+      font-size: 15px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .section {
+      margin-bottom: 20px;
+      padding: 12px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .section h3 {
+      font-size: 12px;
+      color: #7a7870;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      color: #8a8780;
+      font-size: 12px;
+    }
+    input[type="text"], input[type="password"], textarea, select {
+      width: 100%;
+      padding: 6px 10px;
+      margin-bottom: 10px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 4px;
+      color: #b0ada4;
+      font-family: inherit;
+      font-size: 13px;
+    }
+    textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    button {
+      padding: 6px 16px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
+      color: #b0ada4;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { background: rgba(255,255,255,0.1); }
+    button.primary {
+      background: rgba(200,184,138,0.15);
+      border-color: rgba(200,184,138,0.3);
+      color: #c8b88a;
+    }
+    .status-msg {
+      color: #6a8a5a;
+      font-size: 12px;
+      margin-top: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h2>Settings</h2>
+
+  <div class="section">
+    <h3>API Keys</h3>
+    <label>OpenAI API Key (required)</label>
+    <input type="password" id="openai-key" placeholder="sk-..." />
+    <label>Groq API Key (optional)</label>
+    <input type="password" id="groq-key" placeholder="gsk_..." />
+    <label>Anthropic API Key (optional)</label>
+    <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
+    <label>Google API Key (optional)</label>
+    <input type="password" id="google-key" />
+  </div>
+
+  <div class="section">
+    <h3>Interview Settings</h3>
+    <label>Default Mode</label>
+    <select id="default-mode">
+      <option value="general">General (auto-detect)</option>
+      <option value="dsa">DSA / Algorithms</option>
+      <option value="system-design">System Design</option>
+      <option value="behavioral">Behavioral</option>
+      <option value="oop">OOP / Design Patterns</option>
+      <option value="dbms">DBMS / SQL</option>
+    </select>
+    <label>Audio Source</label>
+    <select id="audio-source">
+      <option value="both">System Audio + Microphone</option>
+      <option value="system">System Audio Only</option>
+      <option value="mic">Microphone Only</option>
+    </select>
+    <label>Activation Mode</label>
+    <select id="activation-mode">
+      <option value="manual">Manual (Ctrl+Shift+Y)</option>
+      <option value="auto-detect">Auto-Detect Meeting</option>
+      <option value="push-window">Push-Window (auto-stop on silence)</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <h3>Overlay</h3>
+    <label>Position</label>
+    <select id="overlay-position">
+      <option value="top-center">Top Center (near webcam)</option>
+      <option value="top-left">Top Left</option>
+      <option value="top-right">Top Right</option>
+    </select>
+    <label>Theme</label>
+    <select id="theme">
+      <option value="normal">Normal</option>
+      <option value="night">Night (dimmer)</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <h3>Resume</h3>
+    <textarea id="resume-text" placeholder="Paste your resume text here..."></textarea>
+  </div>
+
+  <div class="section">
+    <h3>Job Description (optional)</h3>
+    <textarea id="job-description" placeholder="Paste the job description..."></textarea>
+  </div>
+
+  <div class="btn-row">
+    <button onclick="closeSettings()">Cancel</button>
+    <button class="primary" onclick="saveSettings()">Save</button>
+  </div>
+  <div class="status-msg" id="save-status">Settings saved!</div>
+
+  <script>
+    const fields = {
+      'openai-key': 'openai_api_key',
+      'groq-key': 'groq_api_key',
+      'anthropic-key': 'anthropic_api_key',
+      'google-key': 'google_api_key',
+      'default-mode': 'default_mode',
+      'audio-source': 'audio_source',
+      'activation-mode': 'activation_mode',
+      'overlay-position': 'overlay_position',
+      'theme': 'theme',
+      'resume-text': 'resume_text',
+      'job-description': 'job_description',
+    };
+
+    async function loadSettings() {
+      try {
+        const config = await window.__TAURI__.core.invoke('load_config');
+        for (const [elemId, configKey] of Object.entries(fields)) {
+          const el = document.getElementById(elemId);
+          if (el && config[configKey] !== undefined) {
+            el.value = config[configKey];
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load config:', e);
+      }
+    }
+
+    async function saveSettings() {
+      const config = {};
+      for (const [elemId, configKey] of Object.entries(fields)) {
+        const el = document.getElementById(elemId);
+        config[configKey] = el ? el.value : '';
+      }
+      config.silence_duration_secs = 3;
+      config.auto_start_on_meeting = config.activation_mode === 'auto-detect';
+
+      try {
+        await window.__TAURI__.core.invoke('save_config', { config });
+        const status = document.getElementById('save-status');
+        status.style.display = 'block';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+      } catch (e) {
+        console.error('Failed to save config:', e);
+        alert('Failed to save: ' + e);
+      }
+    }
+
+    function closeSettings() {
+      window.close();
+    }
+
+    document.addEventListener('DOMContentLoaded', loadSettings);
+  </script>
+</body>
+</html>
