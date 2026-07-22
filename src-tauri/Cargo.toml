@@ -17,6 +17,8 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 rand = "0.8"
 base64 = "0.22"
+cpal = "0.15"
+hound = "3.5"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
