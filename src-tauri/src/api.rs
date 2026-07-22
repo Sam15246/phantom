@@ -306,3 +306,123 @@ pub async fn generate_answer_streaming(
     let _ = app.emit("answer:done", &full_answer);
     Ok(full_answer)
 }
+
+// ---------------------------------------------------------------------------
+// Vision / Screenshot Analysis (streaming)
+// ---------------------------------------------------------------------------
+
+pub async fn analyze_screenshots(
+    app: &AppHandle,
+    api_key: &str,
+    screenshots_b64: &[String],
+    resume: &str,
+    job_description: &str,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+
+    let system_prompt = {
+        let mut prompt = "You are an expert competitive programmer and online assessment (OA) solver. \
+            You are given screenshots of a coding problem from an online assessment. \
+            Analyze the problem carefully, then provide:\n\
+            1. Problem summary\n\
+            2. Approach and algorithm\n\
+            3. Time and space complexity\n\
+            4. Clean, working solution code (Python unless specified otherwise)\n\
+            5. Edge cases and test considerations\n\n\
+            Think step by step. Be thorough and precise."
+            .to_string();
+
+        if !resume.is_empty() {
+            prompt.push_str(&format!("\n\nCandidate's background:\n{resume}"));
+        }
+        if !job_description.is_empty() {
+            prompt.push_str(&format!("\n\nTarget role:\n{job_description}"));
+        }
+        prompt
+    };
+
+    // Build content array with images
+    let mut user_content = Vec::new();
+    user_content.push(serde_json::json!({
+        "type": "text",
+        "text": "Analyze the following screenshot(s) of a coding problem and provide a complete solution."
+    }));
+
+    for b64 in screenshots_b64 {
+        user_content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": format!("data:image/png;base64,{b64}")
+            }
+        }));
+    }
+
+    let body = serde_json::json!({
+        "model": "gpt-4.1",
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": user_content
+            }
+        ],
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "stream": true
+    });
+
+    let _ = app.emit("answer:mode", "OA");
+
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Vision request error: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Vision API error {status}: {body}"));
+    }
+
+    let mut full_answer = String::new();
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Stream error: {e}"))?;
+        let text = String::from_utf8_lossy(&chunk);
+        buffer.push_str(&text);
+
+        while let Some(line_end) = buffer.find('\n') {
+            let line = buffer[..line_end].trim().to_string();
+            buffer = buffer[line_end + 1..].to_string();
+
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    let _ = app.emit("answer:done", &full_answer);
+                    return Ok(full_answer);
+                }
+
+                if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                    if let Some(choice) = chunk.choices.first() {
+                        if let Some(content) = &choice.delta.content {
+                            full_answer.push_str(content);
+                            let _ = app.emit("answer:chunk", content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("answer:done", &full_answer);
+    Ok(full_answer)
+}
