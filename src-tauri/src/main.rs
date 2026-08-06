@@ -88,7 +88,10 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
 
         // Skip mode — small talk, greetings, audio checks
         if extraction.mode == "skip" {
-            let _ = app.emit("answer:done", "No interview question detected — just small talk or audio check.");
+            let _ = app.emit("answer:done", &format!(
+                "Skipped (detected as small talk).\n\n**Transcript:** \"{}\"\n\n**Extracted:** \"{}\"\n\nIf this was a real question, use Ctrl+Shift+4 to lock a mode.",
+                transcript, extraction.question
+            ));
             return Ok(());
         }
 

@@ -49,13 +49,10 @@ pub async fn transcribe_audio(api_key: &str, wav_bytes: Vec<u8>) -> Result<Strin
         .text("keywords[]", "FastAPI")
         .text("keywords[]", "OAuth")
         .text("keywords[]", "JWT")
-        .text("keywords[]", "PAPI")
         .text("keywords[]", "API gateway")
         .text("keywords[]", "RAG")
         .text("keywords[]", "agentic")
         .text("keywords[]", "embeddings")
-        .text("keywords[]", "HSBC")
-        .text("keywords[]", "Click to Pay")
         .part("file", part);
 
     let response = client
@@ -640,6 +637,15 @@ Give clear, structured answers with code examples where relevant. Be direct — 
     }
 
     prompt.push_str(&human_rules);
+
+    // Depth matching — match answer length to question complexity (skip for OA which is always fast)
+    if mode != "oa" {
+        prompt.push_str("\n\nIMPORTANT — Match your answer depth to the question:
+- Simple/overview questions ('explain X', 'what is Y', 'make a simple one'): Give a concise answer. Don't over-engineer. If they say 'simple' or 'basic', keep it short — show you can scope down. Offer to go deeper at the end: 'Happy to add validation/error handling if you want me to go further.'
+- Deep-dive questions ('walk me through the internals', 'how would you handle edge cases', 'design this for production'): Go technical and thorough. Cover tradeoffs, failure modes, real-world concerns.
+- Follow-up probes ('why X over Y?', 'what would break?'): Be specific and brief. 30-60 seconds.
+Listen carefully to scope cues in the question. If they ask for 'basic' or 'simple', don't dump everything you know.");
+    }
 
     // Inject resume/JD for modes that benefit from candidate context.
     // DSA and OA are pure coding — no resume needed. General is too broad.

@@ -209,6 +209,25 @@ html, body {
   border-color: rgba(200, 184, 138, 0.3);
 }
 
+/* --- Debug Header (transcript + extraction) --- */
+.debug-header {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  line-height: 1.5;
+  opacity: 0.75;
+}
+.debug-label {
+  color: var(--text-accent);
+  font-weight: 600;
+}
+.debug-mode {
+  color: var(--text-accent);
+  font-size: 10px;
+}
+
 /* --- Transcript Preview (FEAT-2) --- */
 blockquote.transcript-preview {
   border-left: 2px solid var(--text-accent);
