@@ -2,48 +2,82 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 /// All hotkey events emitted to the frontend
+/// Hotkey bindings — Ctrl+Shift with conflict-free keys
+/// Avoided: N (Chrome incognito), L (VS Code), S (Save As), I (DevTools), F (Find)
+/// Hotkey bindings — Ctrl+Shift with browser-safe keys
+/// Edge/Chrome steal these Ctrl+Shift combos, so we AVOID them:
+///   A (search tabs), B (bookmarks), C (inspect), D (bookmark all),
+///   E (search), I (DevTools), J (downloads), L (address bar),
+///   M (profiles), N (incognito), P (InPrivate), Q (close all),
+///   R (hard refresh), S (save), T (reopen tab), U (source),
+///   V (paste plain), W (close), Y (collections)
+/// Safe keys: F, G, H, K, O, X, Z, numbers, arrows, brackets, Backspace
 const HOTKEY_EVENTS: &[(&str, &str)] = &[
-    ("Ctrl+Shift+Y",       "hotkey:toggle-recording"),
-    ("Ctrl+Shift+S",       "hotkey:screenshot"),
-    ("Ctrl+Shift+A",       "hotkey:analyze"),
-    ("Ctrl+Shift+L",       "hotkey:toggle-click-through"),
-    ("Ctrl+Shift+H",       "hotkey:toggle-visibility"),
-    ("Ctrl+Shift+N",       "hotkey:toggle-night-mode"),
-    ("Ctrl+Shift+W",       "hotkey:snap-to-webcam"),
-    ("Ctrl+Shift+Q",       "hotkey:emergency-exit"),
-    ("Ctrl+Shift+C",       "hotkey:copy-answer"),
-    ("Ctrl+Shift+Up",      "hotkey:move-up"),
+    ("Ctrl+Shift+F6",      "hotkey:toggle-recording"),     // Record/stop
+    ("Ctrl+Shift+F7",      "hotkey:screenshot"),            // Grab screenshot
+    ("Ctrl+Shift+F",       "hotkey:analyze"),              // Find/analyze screenshots
+    ("Ctrl+Shift+F4",      "hotkey:toggle-click-through"), // Toggle click-through
+    ("Ctrl+Shift+H",       "hotkey:toggle-visibility"),    // Hide/show overlay
+    ("Ctrl+Shift+Z",       "hotkey:toggle-night-mode"),    // Night mode
+    ("Ctrl+Shift+F2",      "hotkey:snap-to-webcam"),       // Snap to webcam
+    ("Ctrl+Shift+Q",       "hotkey:emergency-exit"),       // Emergency exit
+    ("Ctrl+Shift+X",       "hotkey:copy-answer"),          // Copy answer
+    ("Ctrl+Shift+F3",      "hotkey:open-settings"),        // Open settings
+    ("Ctrl+Shift+Up",      "hotkey:move-up"),              // Move overlay
     ("Ctrl+Shift+Down",    "hotkey:move-down"),
     ("Ctrl+Shift+Left",    "hotkey:move-left"),
     ("Ctrl+Shift+Right",   "hotkey:move-right"),
-    ("Ctrl+Alt+Up",        "hotkey:opacity-up"),
-    ("Ctrl+Alt+Down",      "hotkey:opacity-down"),
-    ("Ctrl+Shift+1",       "hotkey:model-sol"),
+    ("Ctrl+Shift+9",       "hotkey:opacity-up"),           // Opacity up
+    ("Ctrl+Shift+0",       "hotkey:opacity-down"),         // Opacity down
+    ("Ctrl+Shift+1",       "hotkey:model-sol"),            // Model selection
     ("Ctrl+Shift+2",       "hotkey:model-terra"),
     ("Ctrl+Shift+3",       "hotkey:model-luna"),
-    ("Ctrl+Shift+Delete",  "hotkey:clear-session"),
+    ("Ctrl+Shift+4",       "hotkey:mode-cycle"),            // Cycle mode lock (dsa/oa/sd/lld/ai-interview)
+    ("Ctrl+Shift+5",       "hotkey:mode-unlock"),           // Unlock mode (back to auto-detect)
+    ("Ctrl+Shift+Backspace","hotkey:clear-session"),       // Clear session + screenshots
+    ("Ctrl+Shift+F5",      "hotkey:clear-screenshots"),    // Clear screenshots only
+    ("Ctrl+Shift+F1",      "hotkey:show-help"),            // Show hotkey help
+    ("Ctrl+Shift+.",       "hotkey:copy-code"),            // Copy code blocks only
+    ("Ctrl+Shift+]",       "hotkey:resize-grow"),          // Make overlay bigger
+    ("Ctrl+Shift+[",       "hotkey:resize-shrink"),        // Make overlay smaller
+    ("Ctrl+Shift+F8",      "hotkey:scroll-up"),            // Scroll answer up
+    ("Ctrl+Shift+F9",      "hotkey:scroll-down"),          // Scroll answer down
 ];
 
 pub fn register_all(app: &AppHandle) -> Result<(), String> {
     let global_shortcut = app.global_shortcut();
+    let mut failures: Vec<String> = Vec::new();
 
     for (shortcut_str, event_name) in HOTKEY_EVENTS {
-        let shortcut: Shortcut = shortcut_str
-            .parse()
-            .map_err(|e| format!("Failed to parse shortcut '{shortcut_str}': {e}"))?;
+        let shortcut: Shortcut = match shortcut_str.parse() {
+            Ok(s) => s,
+            Err(e) => {
+                failures.push(format!("{shortcut_str}: {e}"));
+                continue;
+            }
+        };
 
         let event = event_name.to_string();
         let handle = app.clone();
 
-        global_shortcut
+        match global_shortcut
             .on_shortcut(shortcut, move |_app, _shortcut, event_state: ShortcutEvent| {
                 if event_state.state == ShortcutState::Pressed {
                     let _ = handle.emit(&event, ());
                 }
             })
-            .map_err(|e| format!("Failed to register '{shortcut_str}': {e}"))?;
+        {
+            Ok(_) => {}
+            Err(e) => {
+                failures.push(format!("{shortcut_str}: {e}"));
+                continue;
+            }
+        }
+    }
 
-        println!("Registered hotkey: {shortcut_str} \u{2192} {event_name}");
+    if !failures.is_empty() {
+        let msg = failures.join(", ");
+        let _ = app.emit("hotkey:registration-error", &msg);
     }
 
     Ok(())

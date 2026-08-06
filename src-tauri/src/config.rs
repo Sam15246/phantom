@@ -6,24 +6,20 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PhantomConfig {
     pub openai_api_key: String,
     pub groq_api_key: String,
-    pub anthropic_api_key: String,
-    pub google_api_key: String,
-    pub default_mode: String,
     pub audio_source: String,
-    pub overlay_position: String,
     pub theme: String,
     pub resume_text: String,
     pub job_description: String,
-    pub activation_mode: String,
-    pub silence_duration_secs: u32,
-    pub auto_start_on_meeting: bool,
+    pub tts_enabled: bool,
 }
 
 impl Default for PhantomConfig {
@@ -31,17 +27,11 @@ impl Default for PhantomConfig {
         Self {
             openai_api_key: String::new(),
             groq_api_key: String::new(),
-            anthropic_api_key: String::new(),
-            google_api_key: String::new(),
-            default_mode: "general".to_string(),
             audio_source: "both".to_string(),
-            overlay_position: "top-center".to_string(),
             theme: "normal".to_string(),
             resume_text: String::new(),
             job_description: String::new(),
-            activation_mode: "manual".to_string(),
-            silence_duration_secs: 3,
-            auto_start_on_meeting: false,
+            tts_enabled: false,
         }
     }
 }
@@ -64,6 +54,11 @@ fn derive_key() -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(seed.as_bytes());
     hasher.finalize().into()
+}
+
+/// Encrypt data using AES-256-GCM (public for session file encryption)
+pub fn encrypt_data(data: &[u8]) -> Result<Vec<u8>, String> {
+    encrypt(data)
 }
 
 fn encrypt(data: &[u8]) -> Result<Vec<u8>, String> {
@@ -123,4 +118,25 @@ pub fn save_config(config: PhantomConfig) -> Result<(), String> {
     let path = config_path();
     fs::write(&path, encrypted).map_err(|e| format!("Write error: {e}"))?;
     Ok(())
+}
+
+/// Extract text from a PDF file given its bytes (base64 encoded from frontend)
+#[tauri::command]
+pub fn parse_pdf(pdf_b64: String) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&pdf_b64)
+        .map_err(|e| format!("Base64 decode error: {e}"))?;
+
+    let text = pdf_extract::extract_text_from_mem(&bytes)
+        .map_err(|e| format!("PDF parse error: {e}"))?;
+
+    // Clean up extracted text — remove excessive whitespace
+    let cleaned: String = text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(cleaned)
 }

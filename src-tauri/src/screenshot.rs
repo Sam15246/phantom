@@ -153,6 +153,10 @@ pub fn take_screenshot(
 ) -> Result<usize, String> {
     let png_bytes = capture_screen(&app)?;
     let mut q = queue.queue.lock().map_err(|e| format!("Lock error: {e}"))?;
+    // Cap at 5 screenshots — drop oldest when full
+    if q.len() >= 5 {
+        q.remove(0);
+    }
     q.push(png_bytes);
     Ok(q.len())
 }

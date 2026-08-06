@@ -80,6 +80,9 @@
       margin-top: 8px;
       display: none;
     }
+    .status-msg.error {
+      color: #e06050;
+    }
   </style>
 </head>
 <body>
@@ -91,45 +94,24 @@
     <input type="password" id="openai-key" placeholder="sk-..." />
     <label>Groq API Key (optional)</label>
     <input type="password" id="groq-key" placeholder="gsk_..." />
-    <label>Anthropic API Key (optional)</label>
-    <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
-    <label>Google API Key (optional)</label>
-    <input type="password" id="google-key" />
   </div>
 
   <div class="section">
     <h3>Interview Settings</h3>
-    <label>Default Mode</label>
-    <select id="default-mode">
-      <option value="general">General (auto-detect)</option>
-      <option value="dsa">DSA / Algorithms</option>
-      <option value="system-design">System Design</option>
-      <option value="behavioral">Behavioral</option>
-      <option value="oop">OOP / Design Patterns</option>
-      <option value="dbms">DBMS / SQL</option>
-    </select>
     <label>Audio Source</label>
     <select id="audio-source">
       <option value="both">System Audio + Microphone</option>
       <option value="system">System Audio Only</option>
       <option value="mic">Microphone Only</option>
     </select>
-    <label>Activation Mode</label>
-    <select id="activation-mode">
-      <option value="manual">Manual (Ctrl+Shift+Y)</option>
-      <option value="auto-detect">Auto-Detect Meeting</option>
-      <option value="push-window">Push-Window (auto-stop on silence)</option>
-    </select>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+      <input type="checkbox" id="tts-enabled" />
+      TTS Earpiece (reads answers aloud)
+    </label>
   </div>
 
   <div class="section">
     <h3>Overlay</h3>
-    <label>Position</label>
-    <select id="overlay-position">
-      <option value="top-center">Top Center (near webcam)</option>
-      <option value="top-left">Top Left</option>
-      <option value="top-right">Top Right</option>
-    </select>
     <label>Theme</label>
     <select id="theme">
       <option value="normal">Normal</option>
@@ -139,30 +121,35 @@
 
   <div class="section">
     <h3>Resume</h3>
-    <textarea id="resume-text" placeholder="Paste your resume text here..."></textarea>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <button id="btn-upload-resume" style="font-size:11px;padding:4px 10px;">Upload PDF</button>
+      <span id="pdf-status" style="font-size:11px;color:#7a7870;align-self:center;"></span>
+    </div>
+    <input type="file" id="resume-file" accept=".pdf" style="display:none" />
+    <textarea id="resume-text" placeholder="Paste your resume text here or upload a PDF..."></textarea>
   </div>
 
   <div class="section">
     <h3>Job Description (optional)</h3>
-    <textarea id="job-description" placeholder="Paste the job description..."></textarea>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <button id="btn-upload-jd" style="font-size:11px;padding:4px 10px;">Upload PDF</button>
+      <span id="jd-pdf-status" style="font-size:11px;color:#7a7870;align-self:center;"></span>
+    </div>
+    <input type="file" id="jd-file" accept=".pdf" style="display:none" />
+    <textarea id="job-description" placeholder="Paste the job description or upload a PDF..."></textarea>
   </div>
 
   <div class="btn-row">
-    <button onclick="closeSettings()">Cancel</button>
-    <button class="primary" onclick="saveSettings()">Save</button>
+    <button id="btn-cancel">Cancel</button>
+    <button class="primary" id="btn-save">Save</button>
   </div>
-  <div class="status-msg" id="save-status">Settings saved!</div>
+  <div class="status-msg" id="save-status"></div>
 
   <script>
     const fields = {
       'openai-key': 'openai_api_key',
       'groq-key': 'groq_api_key',
-      'anthropic-key': 'anthropic_api_key',
-      'google-key': 'google_api_key',
-      'default-mode': 'default_mode',
       'audio-source': 'audio_source',
-      'activation-mode': 'activation_mode',
-      'overlay-position': 'overlay_position',
       'theme': 'theme',
       'resume-text': 'resume_text',
       'job-description': 'job_description',
@@ -177,28 +164,34 @@
             el.value = config[configKey];
           }
         }
+        if (config.tts_enabled !== undefined) {
+          document.getElementById('tts-enabled').checked = config.tts_enabled;
+        }
       } catch (e) {
-        console.error('Failed to load config:', e);
+        // silently ignore load errors
       }
     }
 
     async function saveSettings() {
-      const config = {};
-      for (const [elemId, configKey] of Object.entries(fields)) {
-        const el = document.getElementById(elemId);
-        config[configKey] = el ? el.value : '';
-      }
-      config.silence_duration_secs = 3;
-      config.auto_start_on_meeting = config.activation_mode === 'auto-detect';
-
+      const status = document.getElementById('save-status');
+      status.className = 'status-msg';
+      status.style.display = 'none';
       try {
+        const config = {};
+        for (const [elemId, configKey] of Object.entries(fields)) {
+          const el = document.getElementById(elemId);
+          config[configKey] = el ? el.value : '';
+        }
+        config.tts_enabled = document.getElementById('tts-enabled').checked;
         await window.__TAURI__.core.invoke('save_config', { config });
-        const status = document.getElementById('save-status');
+        status.textContent = 'Settings saved!';
+        status.className = 'status-msg';
         status.style.display = 'block';
         setTimeout(() => { status.style.display = 'none'; }, 2000);
       } catch (e) {
-        console.error('Failed to save config:', e);
-        alert('Failed to save: ' + e);
+        status.textContent = 'Save failed: ' + e;
+        status.className = 'status-msg error';
+        status.style.display = 'block';
       }
     }
 
@@ -206,7 +199,61 @@
       window.close();
     }
 
-    document.addEventListener('DOMContentLoaded', loadSettings);
+    async function handlePdfUpload(fileInputId, textareaId, statusId) {
+      const fileInput = document.getElementById(fileInputId);
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const statusEl = document.getElementById(statusId);
+
+      if (file.size > 10 * 1024 * 1024) {
+        statusEl.textContent = 'PDF too large (max 10MB)';
+        fileInput.value = '';
+        return;
+      }
+
+      statusEl.textContent = 'Parsing PDF...';
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        // Convert to base64
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(binary);
+
+        const text = await window.__TAURI__.core.invoke('parse_pdf', { pdfB64: b64 });
+        document.getElementById(textareaId).value = text;
+        statusEl.textContent = 'PDF loaded (' + file.name + ')';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      } catch (e) {
+        statusEl.textContent = 'Failed: ' + e;
+        setTimeout(() => { statusEl.textContent = ''; }, 4000);
+      }
+      fileInput.value = '';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadSettings();
+      document.getElementById('btn-save').addEventListener('click', saveSettings);
+      document.getElementById('btn-cancel').addEventListener('click', closeSettings);
+
+      // PDF upload buttons
+      document.getElementById('btn-upload-resume').addEventListener('click', () => {
+        document.getElementById('resume-file').click();
+      });
+      document.getElementById('resume-file').addEventListener('change', () => {
+        handlePdfUpload('resume-file', 'resume-text', 'pdf-status');
+      });
+      document.getElementById('btn-upload-jd').addEventListener('click', () => {
+        document.getElementById('jd-file').click();
+      });
+      document.getElementById('jd-file').addEventListener('change', () => {
+        handlePdfUpload('jd-file', 'job-description', 'jd-pdf-status');
+      });
+    });
   </script>
 </body>
 </html>
