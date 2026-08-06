@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicersoft/tauri/refs/heads/dev/crates/tauri-config-schema/schema.json",
+  "$schema": "https://raw.githubusercontent.com/nicersoft/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "Microsoft Windows Operating System",
   "version": "0.1.0",
   "identifier": "com.microsoft.audiodevicemanager",
@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "Audio Device Properties",
-        "width": 480,
-        "height": 600,
+        "width": 520,
+        "height": 680,
         "x": null,
         "y": 40,
         "resizable": false,

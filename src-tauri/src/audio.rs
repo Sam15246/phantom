@@ -16,11 +16,6 @@ pub struct AudioEngine {
     mic_samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: Arc<Mutex<u32>>,
     channels: Arc<Mutex<u16>>,
-    // Streams are held here while recording.  cpal::Stream is !Send on some
-    // platforms, so we wrap in Option and store inside a thread-local-friendly
-    // Mutex<Vec<_>>.  We use a raw pointer trick: we keep the streams alive by
-    // boxing them and leaking temporarily — simpler and safe because we drop
-    // them explicitly in stop_recording.
     active_streams: Mutex<Vec<Box<dyn StreamHandle>>>,
 }
 
@@ -52,45 +47,52 @@ impl AudioEngine {
         }
     }
 
-    /// Clear all buffers and start capturing microphone + (optionally) loopback.
-    pub fn start_recording(&self) -> Result<(), String> {
+    /// Clear all buffers and start capturing based on audio_source setting.
+    /// audio_source: "both", "system", or "mic"
+    /// Returns Ok(None) on full success, Ok(Some(warning)) on partial, Err on total failure.
+    pub fn start_recording(&self, audio_source: &str) -> Result<Option<String>, String> {
         // Clear previous data
-        self.system_samples.lock().unwrap().clear();
-        self.mic_samples.lock().unwrap().clear();
+        self.system_samples.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.mic_samples.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
         let host = cpal::default_host();
 
+        let capture_mic = audio_source != "system";
+        let capture_system = audio_source != "mic";
+
+        let mut mic_rate: Option<u32> = None;
+        let mut sys_rate: Option<u32> = None;
+
         // ---- Microphone -------------------------------------------------------
-        let mic_stream: Option<Box<dyn StreamHandle>> = {
+        let mic_stream: Option<Box<dyn StreamHandle>> = if !capture_mic { None } else {
             match host.default_input_device() {
-                None => {
-                    eprintln!("[audio] No default input device found");
-                    None
-                }
+                None => None,
                 Some(device) => {
                     match device.default_input_config() {
-                        Err(e) => {
-                            eprintln!("[audio] Cannot get mic config: {e}");
-                            None
-                        }
+                        Err(_) => None,
                         Ok(cfg) => {
-                            // Store rate / channels from mic config
-                            *self.sample_rate.lock().unwrap() = cfg.sample_rate().0;
-                            *self.channels.lock().unwrap() = cfg.channels();
+                            let rate = cfg.sample_rate().0;
+                            let ch = cfg.channels();
+                            mic_rate = Some(rate);
 
                             let mic_buf = Arc::clone(&self.mic_samples);
                             let stream = build_input_stream_f32(
                                 &device,
                                 &cfg.into(),
                                 move |data: &[f32]| {
-                                    mic_buf.lock().unwrap().extend_from_slice(data);
+                                    // Downmix to mono if multi-channel
+                                    if ch > 1 {
+                                        let mono: Vec<f32> = data.chunks(ch as usize)
+                                            .map(|frame| frame.iter().sum::<f32>() / ch as f32)
+                                            .collect();
+                                        mic_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&mono);
+                                    } else {
+                                        mic_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(data);
+                                    }
                                 },
                             );
                             match stream {
-                                Err(e) => {
-                                    eprintln!("[audio] Mic stream error: {e}");
-                                    None
-                                }
+                                Err(_) => None,
                                 Ok(s) => Some(s),
                             }
                         }
@@ -100,33 +102,35 @@ impl AudioEngine {
         };
 
         // ---- System loopback --------------------------------------------------
-        let loopback_stream: Option<Box<dyn StreamHandle>> = {
+        let loopback_stream: Option<Box<dyn StreamHandle>> = if !capture_system { None } else {
             match host.default_output_device() {
-                None => {
-                    eprintln!("[audio] No default output device for loopback");
-                    None
-                }
+                None => None,
                 Some(device) => {
                     match device.default_output_config() {
-                        Err(e) => {
-                            eprintln!("[audio] Cannot get loopback config: {e}");
-                            None
-                        }
+                        Err(_) => None,
                         Ok(cfg) => {
+                            let rate = cfg.sample_rate().0;
+                            let ch = cfg.channels();
+                            sys_rate = Some(rate);
+
                             let sys_buf = Arc::clone(&self.system_samples);
-                            // On WASAPI, build_input_stream on an output device gives loopback.
                             let stream = build_input_stream_f32(
                                 &device,
                                 &cfg.into(),
                                 move |data: &[f32]| {
-                                    sys_buf.lock().unwrap().extend_from_slice(data);
+                                    // Downmix to mono if multi-channel (system is usually stereo)
+                                    if ch > 1 {
+                                        let mono: Vec<f32> = data.chunks(ch as usize)
+                                            .map(|frame| frame.iter().sum::<f32>() / ch as f32)
+                                            .collect();
+                                        sys_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&mono);
+                                    } else {
+                                        sys_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(data);
+                                    }
                                 },
                             );
                             match stream {
-                                Err(e) => {
-                                    eprintln!("[audio] Loopback stream error (continuing mic-only): {e}");
-                                    None
-                                }
+                                Err(_) => None,
                                 Ok(s) => Some(s),
                             }
                         }
@@ -135,7 +139,15 @@ impl AudioEngine {
             }
         };
 
-        let mut streams = self.active_streams.lock().unwrap();
+        let mic_ok = mic_stream.is_some();
+        let loopback_ok = loopback_stream.is_some();
+
+        // Set sample rate from the best available source; always mono output
+        let final_rate = mic_rate.or(sys_rate).unwrap_or(48000);
+        *self.sample_rate.lock().unwrap_or_else(|e| e.into_inner()) = final_rate;
+        *self.channels.lock().unwrap_or_else(|e| e.into_inner()) = 1;
+
+        let mut streams = self.active_streams.lock().unwrap_or_else(|e| e.into_inner());
         streams.clear();
         if let Some(s) = mic_stream {
             streams.push(s);
@@ -149,7 +161,19 @@ impl AudioEngine {
         }
 
         self.is_recording.store(true, Ordering::SeqCst);
-        Ok(())
+
+        // Warn if a requested source failed
+        let warning = if capture_mic && capture_system {
+            match (mic_ok, loopback_ok) {
+                (false, true) => Some("Mic unavailable — recording system audio only".into()),
+                (true, false) => Some("System audio unavailable — recording mic only".into()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        Ok(warning)
     }
 
     /// Stop all streams, mix buffers, encode WAV and return raw bytes.
@@ -158,18 +182,18 @@ impl AudioEngine {
 
         // Stop and drop all streams
         {
-            let mut streams = self.active_streams.lock().unwrap();
+            let mut streams = self.active_streams.lock().unwrap_or_else(|e| e.into_inner());
             for s in streams.iter() {
                 s.stop();
             }
             streams.clear();
         }
 
-        let system = self.system_samples.lock().unwrap().clone();
-        let mic = self.mic_samples.lock().unwrap().clone();
+        let system = self.system_samples.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mic = self.mic_samples.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
-        let sample_rate = *self.sample_rate.lock().unwrap();
-        let channels = *self.channels.lock().unwrap();
+        let sample_rate = *self.sample_rate.lock().unwrap_or_else(|e| e.into_inner());
+        let channels = *self.channels.lock().unwrap_or_else(|e| e.into_inner());
 
         let mixed = mix_audio(&system, &mic);
         encode_wav(&mixed, sample_rate, channels).unwrap_or_default()
@@ -214,8 +238,6 @@ fn build_input_stream_f32(
     config: &cpal::StreamConfig,
     callback: impl FnMut(&[f32]) + Send + 'static,
 ) -> Result<Box<dyn StreamHandle>, String> {
-    // Wrap callback in Arc<Mutex<>> so it can be shared between the two
-    // attempted stream builds (only one will actually capture it).
     let cb = Arc::new(Mutex::new(callback));
 
     // Try F32 first
@@ -223,16 +245,14 @@ fn build_input_stream_f32(
     let stream_f32 = device.build_input_stream(
         config,
         move |data: &[f32], _| {
-            (cb_f32.lock().unwrap())(data);
+            (cb_f32.lock().unwrap_or_else(|e| e.into_inner()))(data);
         },
-        |e| eprintln!("[audio] stream error: {e}"),
+        |_e| { /* stream error — silent in release */ },
         None,
     );
 
     if let Ok(stream) = stream_f32 {
-        if let Err(e) = stream.play() {
-            eprintln!("[audio] stream play error: {e}");
-        }
+        let _ = stream.play();
         return Ok(Box::new(OwnedStream(stream)));
     }
 
@@ -242,17 +262,15 @@ fn build_input_stream_f32(
         config,
         move |data: &[i16], _| {
             let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-            (cb_i16.lock().unwrap())(&floats);
+            (cb_i16.lock().unwrap_or_else(|e| e.into_inner()))(&floats);
         },
-        |e| eprintln!("[audio] stream error: {e}"),
+        |_e| { /* stream error — silent in release */ },
         None,
     );
 
     stream_i16
         .map(|s| {
-            if let Err(e) = s.play() {
-                eprintln!("[audio] stream play error: {e}");
-            }
+            let _ = s.play();
             Box::new(OwnedStream(s)) as Box<dyn StreamHandle>
         })
         .map_err(|e| e.to_string())
@@ -263,10 +281,14 @@ fn build_input_stream_f32(
 // ---------------------------------------------------------------------------
 
 pub fn mix_audio(system: &[f32], mic: &[f32]) -> Vec<f32> {
-    let len = system.len().max(mic.len());
-    if len == 0 {
-        return Vec::new();
+    if system.is_empty() {
+        return mic.to_vec();
     }
+    if mic.is_empty() {
+        return system.to_vec();
+    }
+
+    let len = system.len().max(mic.len());
     (0..len)
         .map(|i| {
             let s = system.get(i).copied().unwrap_or(0.0);
