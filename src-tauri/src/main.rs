@@ -347,12 +347,15 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // Process-level stealth: below-normal priority + efficiency mode
+            overlay::apply_process_stealth();
+
             // Apply content protection
             if let Err(e) = overlay::apply_content_protection(&handle) {
                 let _ = handle.emit("pipeline:error", format!("Content protection failed: {e}"));
             }
 
-            // Hide main window from Alt+Tab
+            // Hide main window from Alt+Tab / Win+Tab
             overlay::hide_from_alt_tab(&handle);
 
             // Enable click-through by default
@@ -414,6 +417,8 @@ fn main() {
                     let new_val = !was_enabled;
                     state.enabled.store(new_val, std::sync::atomic::Ordering::SeqCst);
                     let _ = overlay::set_click_through(ct_handle.clone(), new_val);
+                    // Toggle WS_EX_NOACTIVATE: on when passive (click-through), off when interactive
+                    overlay::update_noactivate(&ct_handle, new_val);
                     let _ = ct_handle.emit("hotkey:toggle-click-through-ui", new_val);
                 });
             }

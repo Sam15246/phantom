@@ -27,7 +27,7 @@ chrono = "0.4"
 pdf-extract = "0.8"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.59", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Threading"] }
 
 [profile.release]
 strip = true
