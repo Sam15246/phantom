@@ -14,6 +14,7 @@ pub struct ConversationHistory {
     pub messages: std::sync::Mutex<Vec<api::ChatMessage>>,
     pub last_mode: std::sync::Mutex<String>,
     pub locked_mode: std::sync::Mutex<Option<String>>,
+    pub pipeline_running: std::sync::atomic::AtomicBool,
 }
 
 impl ConversationHistory {
@@ -22,6 +23,7 @@ impl ConversationHistory {
             messages: std::sync::Mutex::new(Vec::new()),
             last_mode: std::sync::Mutex::new("general".to_string()),
             locked_mode: std::sync::Mutex::new(None),
+            pipeline_running: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -50,9 +52,11 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         return Err("No API key".into());
     }
 
+    let http = app.state::<api::SharedHttpClient>();
+
     // Step 1: Transcribe
     let _ = app.emit("pipeline:status", "Transcribing...");
-    let transcript = api::transcribe_audio(&cfg.openai_api_key, wav_bytes).await?;
+    let transcript = api::transcribe_audio(&http.client, &cfg.openai_api_key, wav_bytes).await?;
     let _ = app.emit("pipeline:transcript", &transcript);
 
     if transcript.trim().is_empty() {
@@ -79,7 +83,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         // Auto-detect mode via Groq extraction
         let _ = app.emit("pipeline:status", "Analyzing question...");
         let extraction = if !cfg.groq_api_key.is_empty() {
-            api::extract_question(&cfg.groq_api_key, &transcript).await
+            api::extract_question(&http.client, &cfg.groq_api_key, &transcript).await
                 .unwrap_or_else(|_| api::fallback_extraction(&transcript))
         } else {
             api::fallback_extraction(&transcript)
@@ -100,11 +104,12 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         (extraction.question, mode, extraction.context)
     };
 
-    // Get current history for context (cap at last 40 messages to limit memory)
+    // Get recent history for context (cap at last 20 messages — ~10 Q&A pairs)
+    // Keeping this lean reduces input tokens and speeds up time-to-first-token
     let hist: Vec<api::ChatMessage> = {
         let msgs = history_state.messages.lock().unwrap_or_else(|e| e.into_inner());
-        if msgs.len() > 40 {
-            msgs[msgs.len() - 40..].to_vec()
+        if msgs.len() > 20 {
+            msgs[msgs.len() - 20..].to_vec()
         } else {
             msgs.clone()
         }
@@ -114,6 +119,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
     let _ = app.emit("pipeline:status", "Generating answer...");
     let answer = api::generate_answer_streaming(
         &app,
+        &http.client,
         &cfg.openai_api_key,
         &question,
         &effective_mode,
@@ -151,12 +157,24 @@ async fn ask_followup(
         return Err("OpenAI API key not set".into());
     }
 
+    let _ = app.emit("pipeline:started", ());
+    let _ = app.emit("pipeline:status", "Generating answer...");
+
+    let http = app.state::<api::SharedHttpClient>();
     let history_state = app.state::<ConversationHistory>();
-    let mode = history_state.last_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // Use locked_mode if set, otherwise fall back to last_mode
+    let mode = {
+        let locked = history_state.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(locked_mode) = locked {
+            locked_mode
+        } else {
+            history_state.last_mode.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+    };
     let hist: Vec<api::ChatMessage> = {
         let msgs = history_state.messages.lock().unwrap_or_else(|e| e.into_inner());
-        if msgs.len() > 40 {
-            msgs[msgs.len() - 40..].to_vec()
+        if msgs.len() > 20 {
+            msgs[msgs.len() - 20..].to_vec()
         } else {
             msgs.clone()
         }
@@ -164,6 +182,7 @@ async fn ask_followup(
 
     let answer = api::generate_answer_streaming(
         &app,
+        &http.client,
         &cfg.openai_api_key,
         &question,
         &mode,
@@ -192,7 +211,8 @@ async fn ask_followup(
 }
 
 #[tauri::command]
-async fn speak_answer(_app: tauri::AppHandle, text: String) -> Result<String, String> {
+async fn speak_answer(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    use tauri::Manager;
     let cfg = config::load_config_internal()?;
     if !cfg.tts_enabled {
         return Err("TTS is disabled".into());
@@ -200,7 +220,8 @@ async fn speak_answer(_app: tauri::AppHandle, text: String) -> Result<String, St
     if cfg.openai_api_key.is_empty() {
         return Err("OpenAI API key not set".into());
     }
-    api::text_to_speech(&cfg.openai_api_key, &text).await
+    let http = app.state::<api::SharedHttpClient>();
+    api::text_to_speech(&http.client, &cfg.openai_api_key, &text).await
 }
 
 #[tauri::command]
@@ -279,8 +300,10 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
     let _ = app.emit("answer:mode", "SUMMARY");
 
     // Use streaming answer generation (reuse existing infrastructure)
+    let http = app.state::<api::SharedHttpClient>();
     api::generate_answer_streaming(
         &app,
+        &http.client,
         &cfg.openai_api_key,
         &format!("Generate a post-interview summary for this conversation:\n\n{conversation}"),
         "general",
@@ -302,6 +325,7 @@ fn main() {
         .manage(ConversationHistory::new())
         .manage(ClickThroughState::new())
         .manage(screenshot::ScreenshotQueue::new())
+        .manage(api::SharedHttpClient::new())
         .invoke_handler(tauri::generate_handler![
             overlay::set_click_through,
             overlay::toggle_overlay_visibility,
@@ -469,7 +493,8 @@ fn main() {
                         Some("oa")        => Some("system-design".to_string()),
                         Some("system-design") => Some("lld".to_string()),
                         Some("lld")       => Some("ai-interview".to_string()),
-                        Some("ai-interview") => None,
+                        Some("ai-interview") => Some("ai-ml".to_string()),
+                        Some("ai-ml")     => None,
                         Some(_)           => None,
                     };
 
@@ -510,11 +535,23 @@ fn main() {
                         *store.data.lock().unwrap_or_else(|e| e.into_inner()) = Some(wav_bytes.clone());
                         let _ = rec_handle.emit("recording:stopped", byte_count);
 
-                        // Spawn the AI pipeline
+                        // Spawn the AI pipeline (with concurrency guard)
                         let pipeline_handle = rec_handle.clone();
                         let wav = wav_bytes;
                         tauri::async_runtime::spawn(async move {
-                            if let Err(e) = run_pipeline(pipeline_handle.clone(), wav).await {
+                            use tauri::Manager;
+                            let history = pipeline_handle.state::<ConversationHistory>();
+                            if history.pipeline_running.compare_exchange(
+                                false, true,
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                            ).is_err() {
+                                let _ = pipeline_handle.emit("pipeline:error", "Another pipeline is still running");
+                                return;
+                            }
+                            let result = run_pipeline(pipeline_handle.clone(), wav).await;
+                            history.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
+                            if let Err(e) = result {
                                 let _ = pipeline_handle.emit("pipeline:error", &e);
                             }
                         });
@@ -572,7 +609,9 @@ fn main() {
                                 );
 
                                 // Use non-streaming request for background summary
+                                let http = summary_handle.state::<api::SharedHttpClient>();
                                 if let Ok(summary) = api::generate_answer_silent(
+                                    &http.client,
                                     &cfg.openai_api_key,
                                     &summary_prompt,
                                 ).await {
@@ -650,6 +689,17 @@ fn main() {
                     }
 
                     tauri::async_runtime::spawn(async move {
+                        // Concurrency guard — prevent voice and screenshot pipelines from overlapping
+                        let history_guard = ah.state::<ConversationHistory>();
+                        if history_guard.pipeline_running.compare_exchange(
+                            false, true,
+                            std::sync::atomic::Ordering::SeqCst,
+                            std::sync::atomic::Ordering::SeqCst,
+                        ).is_err() {
+                            let _ = ah.emit("pipeline:error", "Another pipeline is still running");
+                            return;
+                        }
+
                         let _ = ah.emit("pipeline:started", ());
                         let _ = ah.emit("pipeline:status", "Analyzing screenshots...");
 
@@ -657,12 +707,14 @@ fn main() {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = ah.emit("pipeline:error", &format!("Config error: {e}"));
+                                history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                                 return;
                             }
                         };
 
                         if cfg.openai_api_key.is_empty() {
                             let _ = ah.emit("pipeline:error", "OpenAI API key not set. Press Ctrl+Shift+, to open settings.");
+                            history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                             return;
                         }
 
@@ -680,11 +732,20 @@ fn main() {
                             }
                         };
 
+                        // Snapshot conversation history for the model to see previous solutions
+                        let history_snapshot = {
+                            let msgs = history.messages.lock().unwrap_or_else(|e| e.into_inner());
+                            msgs.clone()
+                        };
+
+                        let http = ah.state::<api::SharedHttpClient>();
                         match api::analyze_screenshots(
                             &ah,
+                            &http.client,
                             &cfg.openai_api_key,
                             &screenshots_b64,
                             &current_mode,
+                            &history_snapshot,
                         )
                         .await
                         {
@@ -715,6 +776,8 @@ fn main() {
                                 let _ = ah.emit("pipeline:error", &format!("Analysis error: {e}"));
                             }
                         }
+                        // Release concurrency guard
+                        history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                     });
                 });
             }

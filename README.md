@@ -56,7 +56,7 @@ All hotkeys use **Ctrl+Shift** prefix (conflict-free with Chrome/Edge):
 | Z | Night Mode |
 | X | Copy Answer |
 | . | Copy Code Blocks Only |
-| 4 | Cycle Mode Lock (DSA > OA > SD > LLD > AI-Interview > Auto) |
+| 4 | Cycle Mode Lock (DSA > OA > SD > LLD > AI-Interview > AI-ML > Auto) |
 | 5 | Unlock Mode (Auto-detect) |
 | 1 / 2 / 3 | Model: Sol / Terra / Luna |
 | 9 / 0 | Opacity Up / Down |

@@ -15,6 +15,23 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Shared HTTP client — reuses TCP+TLS connections across API calls
+pub struct SharedHttpClient {
+    pub client: reqwest::Client,
+}
+
+impl SharedHttpClient {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .pool_max_idle_per_host(2)
+                .build()
+                .expect("Failed to create HTTP client"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Transcription (OpenAI)
 // ---------------------------------------------------------------------------
@@ -24,11 +41,7 @@ struct TranscriptionResponse {
     text: String,
 }
 
-pub async fn transcribe_audio(api_key: &str, wav_bytes: Vec<u8>) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes: Vec<u8>) -> Result<String, String> {
 
     let part = multipart::Part::bytes(wav_bytes)
         .file_name("recording.wav")
@@ -111,11 +124,7 @@ pub struct ExtractionResult {
     pub context: String,
 }
 
-pub async fn extract_question(groq_api_key: &str, transcript: &str) -> Result<ExtractionResult, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, transcript: &str) -> Result<ExtractionResult, String> {
 
     let system_prompt = r#"You are an interview question extractor. Given a transcript, extract:
 1. The core interview question (cleaned up)
@@ -269,7 +278,9 @@ Strengths: Pick 2, back each with a specific example from your work. Weaknesses:
 
 9. **End with a hook.** Finish with something that invites follow-up: 'That was probably one of the more interesting challenges on that project' or 'Happy to go deeper into the [specific aspect]'. This sounds natural and buys thinking time.
 
-10. **Don't dump everything.** Give enough to answer well, then stop. Leave interesting details for follow-ups — this makes the conversation feel natural and gives you more material for later questions.",
+10. **Don't dump everything.** Give enough to answer well, then stop. Leave interesting details for follow-ups — this makes the conversation feel natural and gives you more material for later questions.
+
+11. **One project = one focused answer.** When asked about a specific project, focus on its CORE purpose and ONE key challenge. Don't mix in other projects or contributions from the same company. Mention others briefly ONLY if directly asked. Leave details for follow-ups — this keeps answers tight and gives you more material for later questions.",
 
         "dsa" => "You are helping someone in a LIVE coding interview. Write the answer as a SCRIPT — exactly what the candidate should SAY and CODE while talking to the interviewer. This is 'thinking aloud' format.
 
@@ -618,9 +629,16 @@ Give clear, structured answers with code examples where relevant. Be direct — 
     let mut prompt = base.to_string();
 
     // Humanization — make answers sound natural, not AI-generated
-    // For structured modes (OA, DSA with code, system-design with diagrams), keep it lighter
-    let is_structured_mode = matches!(mode, "oa" | "dsa" | "system-design" | "lld");
+    // OA skips entirely (speed-critical, paste-ready code)
+    // Structured modes (DSA, system-design, lld) get Layer 1 only (anti-AI-tells)
+    // Non-structured modes get Layer 1 + Layer 2 (conversational tone)
+    if mode == "oa" {
+        // OA: skip all humanization — speed and conciseness matter most
+    }
 
+    let is_structured_mode = matches!(mode, "dsa" | "system-design" | "lld");
+
+    if mode != "oa" {
     let mut human_rules = String::from("\n\nIMPORTANT — Sound human, not AI:
 - Never start with 'Great question!' or 'That's an excellent question!' — just answer directly.
 - Don't say 'Certainly!', 'Absolutely!', 'Of course!' — these are AI tells.
@@ -637,6 +655,7 @@ Give clear, structured answers with code examples where relevant. Be direct — 
     }
 
     prompt.push_str(&human_rules);
+    } // end if mode != "oa"
 
     // Depth matching — match answer length to question complexity (skip for OA which is always fast)
     if mode != "oa" {
@@ -649,7 +668,8 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
 
     // Inject resume/JD for modes that benefit from candidate context.
     // DSA and OA are pure coding — no resume needed. General is too broad.
-    let needs_resume = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "cloud" | "lld" | "dbms");
+    // DBMS and Cloud are pure theory — resume adds noise without value.
+    let needs_resume = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "lld");
     if needs_resume && !resume.is_empty() {
         prompt.push_str(&format!("\n\n=== YOUR BACKGROUND (resume + project details) ===\nEverything below is YOUR real experience. Use these details to give contextually relevant examples when it helps — e.g., referencing your own projects as examples in system design, or mentioning technologies you've actually used. Do NOT invent alternatives when details are provided here.\n\n{resume}"));
     }
@@ -661,6 +681,7 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
 
 pub async fn generate_answer_streaming(
     app: &AppHandle,
+    client: &reqwest::Client,
     api_key: &str,
     question: &str,
     mode: &str,
@@ -669,10 +690,6 @@ pub async fn generate_answer_streaming(
     resume: &str,
     job_description: &str,
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
     let model = select_model(mode);
     let system_prompt = build_system_prompt(mode, resume, job_description);
 
@@ -762,22 +779,31 @@ pub async fn generate_answer_streaming(
 
 pub async fn analyze_screenshots(
     app: &AppHandle,
+    client: &reqwest::Client,
     api_key: &str,
     screenshots_b64: &[String],
     current_mode: &str,
+    history: &[ChatMessage],
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
 
-    // Use interview-style (thinking aloud) prompt for live interview contexts,
-    // OA-style (fast, paste-ready) prompt for timed assessments or default
-    let is_live_interview = matches!(current_mode, "dsa" | "ai-interview" | "system-design" | "lld" | "behavioral" | "ai-ml" | "backend" | "java" | "python" | "dbms" | "cloud");
+    // Three screenshot prompt categories:
+    // 1. Live coding (dsa, lld, java, python) — thinking-aloud with brute→optimal→code
+    // 2. Live non-coding (ai-interview, behavioral, system-design, ai-ml, backend, dbms, cloud) — contextual analysis
+    // 3. OA (oa, general, default) — fast paste-ready solver
+    let is_live_coding = matches!(current_mode, "dsa" | "lld" | "java" | "python");
+    let is_live_non_coding = matches!(current_mode, "ai-interview" | "behavioral" | "system-design" | "ai-ml" | "backend" | "dbms" | "cloud");
 
-    let system_prompt = if is_live_interview {
-        "You are helping someone in a LIVE coding interview. You are given screenshots of a coding problem. \
+    let system_prompt = if is_live_coding {
+        format!("You are helping someone in a LIVE coding interview. You are given screenshots of a coding problem. \
         Write the answer as a SCRIPT — exactly what the candidate should SAY and CODE while talking to the interviewer. This is 'thinking aloud' format.\n\n\
+        **IF screenshot shows a failed submission (Wrong Answer, TLE, RE):**\n\
+        Say: 'Hmm, looks like that didn't pass all cases. Let me look at why...'\n\
+        1. Identify the failing test case from the screenshot.\n\
+        2. Trace through the previous solution with that input — find exactly where it goes wrong.\n\
+        3. Say: 'Ah I see the issue — [root cause]. Let me fix that.'\n\
+        4. Show the corrected code with narration. Mark changes with `// FIXED:` comments.\n\
+        5. Trace the fix through the failing case to confirm.\n\n\
+        **IF screenshot shows a new problem:**\n\
         **1. Initial reaction (say this first):**\n\
         Start with: 'Ok so looking at this...' — restate the problem briefly in your own words. Mention any clarifying questions.\n\n\
         **2. Brute force (talk through it):**\n\
@@ -800,11 +826,36 @@ pub async fn analyze_screenshots(
         - Sound like a confident engineer thinking through a problem LIVE, not reciting a prepared answer.\n\
         - Use phrases like: 'My first thought is...', 'The trick here is...', 'The reason I chose this over X is...'\n\
         - Code must be COMPLETE and CORRECT — not pseudocode.\n\
-        - Default to Java 17+ unless the screenshot shows a different language template."
-        .to_string()
+        - Default to Java 17+ unless the screenshot shows a different language template.\n\
+        - When diagnosing a failure, ALWAYS reference the previous solution — never ignore it.{}",
+        if !history.is_empty() { "\n\nIMPORTANT: The conversation history below contains the previous solution. Use it to diagnose failures." } else { "" })
+    } else if is_live_non_coding {
+        format!("You are helping someone in a LIVE interview. You are given screenshots related to the interview.\n\n\
+        Analyze the screenshot(s) and provide a helpful answer in the context of the current mode: {}.\n\n\
+        **IF the screenshot shows a diagram, architecture, or design:**\n\
+        Explain what it shows, identify key components, and suggest how the candidate should talk through it.\n\n\
+        **IF the screenshot shows a question, prompt, or text:**\n\
+        Extract the question and provide a clear, conversational answer the candidate can speak aloud.\n\n\
+        **IF the screenshot shows code or terminal output:**\n\
+        Analyze what's happening, identify any issues, and suggest what the candidate should say.\n\n\
+        RULES:\n\
+        - Write as a SCRIPT — what the candidate should SAY, not a written essay.\n\
+        - Sound like a confident engineer, not a textbook.\n\
+        - Be concise and focused. Match depth to what's shown.\n\
+        - If there's code in the screenshot, provide corrected/improved code if relevant.{}",
+        current_mode.to_uppercase(),
+        if !history.is_empty() { "\n\nIMPORTANT: The conversation history below provides context from earlier in this interview." } else { "" })
     } else {
-        "You are an expert competitive programmer and OA solver. \
-        You are given screenshots of a coding problem. Analyze the problem, then provide:\n\n\
+        format!("You are an expert competitive programmer and OA solver. \
+        You are given screenshots of a coding problem.\n\n\
+        **FAILURE DIAGNOSIS (if screenshot shows Wrong Answer, TLE, Runtime Error, or MLE):**\n\
+        If the screenshot shows a submission result with an error:\n\
+        1. **Error type**: Identify what failed (Wrong Answer, TLE, RE, MLE) and the failing test case if visible.\n\
+        2. **Diagnosis**: Trace through the failing input using the PREVIOUS solution step by step. Explain exactly WHERE and WHY it produces the wrong output.\n\
+        3. **Root cause**: State the exact bug or algorithmic flaw in 1-2 sentences.\n\
+        4. **Fixed code**: Show the corrected code. Highlight what changed with `// FIXED:` comments. Do NOT rewrite from scratch unless the algorithm is fundamentally wrong.\n\
+        5. **Verify**: Trace the failing test case through the FIXED code to confirm it now produces the correct output.\n\n\
+        **FRESH PROBLEM (if screenshot shows a new problem statement):**\n\
         **1. Approach** (2-3 lines max): Name the technique, explain the key insight in one sentence, give time/space complexity.\n\n\
         **2. Brute force** (skip if optimal is obvious): Idea + complexity in 1-2 lines. Mention why it's suboptimal.\n\n\
         **3. Optimal approach**: Explain WHY the optimization works — connect it to the technique. Give time/space complexity.\n\n\
@@ -815,15 +866,25 @@ pub async fn analyze_screenshots(
         - Be FAST and concise. No filler, no textbook explanations.\n\
         - Code must be COMPLETE and CORRECT — not pseudocode.\n\
         - If multiple optimal approaches exist, briefly mention the alternative in one line.\n\
-        - Default to Java 17+ unless the screenshot shows a different language template."
-        .to_string()
+        - Default to Java 17+ unless the screenshot shows a different language template.\n\
+        - When diagnosing a failure, ALWAYS reference the previous solution — never ignore it.{}",
+        if !history.is_empty() { "\n\nIMPORTANT: The conversation history below contains the previous solution. Use it to diagnose failures." } else { "" })
     };
 
     // Build content array with images
     let mut user_content = Vec::new();
+
+    let user_text = if history.is_empty() {
+        "Analyze the following screenshot(s) of a coding problem and provide a complete solution.".to_string()
+    } else {
+        "Analyze the following screenshot(s). If this shows a submission error (Wrong Answer, TLE, Runtime Error, MLE), \
+         diagnose what went wrong with the previous solution from our conversation and provide a corrected version. \
+         If this is a new problem, solve it from scratch.".to_string()
+    };
+
     user_content.push(serde_json::json!({
         "type": "text",
-        "text": "Analyze the following screenshot(s) of a coding problem and provide a complete solution."
+        "text": user_text
     }));
 
     for b64 in screenshots_b64 {
@@ -835,18 +896,33 @@ pub async fn analyze_screenshots(
         }));
     }
 
+    // Build messages: system → recent history (last 6 messages max) → user with screenshots
+    let mut messages = vec![serde_json::json!({
+        "role": "system",
+        "content": system_prompt
+    })];
+
+    // Inject recent conversation history so the model can see previous solutions
+    let history_tail: Vec<_> = if history.len() > 6 {
+        history[history.len() - 6..].to_vec()
+    } else {
+        history.to_vec()
+    };
+    for msg in &history_tail {
+        messages.push(serde_json::json!({
+            "role": msg.role,
+            "content": msg.content
+        }));
+    }
+
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": user_content
+    }));
+
     let body = serde_json::json!({
         "model": "gpt-5.6-terra",
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_content
-            }
-        ],
+        "messages": messages,
         "max_completion_tokens": 4096,
         "stream": true
     });
@@ -909,13 +985,10 @@ pub async fn analyze_screenshots(
 // ---------------------------------------------------------------------------
 
 pub async fn generate_answer_silent(
+    client: &reqwest::Client,
     api_key: &str,
     prompt: &str,
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let body = serde_json::json!({
         "model": "gpt-5.6-luna",
@@ -946,11 +1019,7 @@ pub async fn generate_answer_silent(
 }
 
 /// Text-to-speech via OpenAI TTS API — returns audio bytes as base64
-pub async fn text_to_speech(api_key: &str, text: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str) -> Result<String, String> {
 
     // Summarize long answers for TTS (keep under ~200 words for natural speech)
     let tts_text = if text.split_whitespace().count() > 200 {
