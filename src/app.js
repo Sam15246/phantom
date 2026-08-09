@@ -4,6 +4,9 @@
 let isClickThrough = true;
 let isNightMode = false;
 let opacity = 0.92;
+let isCompactMode = false;
+let fontSizeLevel = 1; // 0=S, 1=M (default), 2=L
+let autoScrollTimer = null;
 
 // --- Night Mode ---
 function toggleNightMode() {
@@ -146,6 +149,23 @@ function highlightCode() {
       }
     });
   }
+  // Add per-block copy buttons to each code block
+  document.querySelectorAll('#answer-box pre').forEach((pre) => {
+    if (pre.querySelector('.code-copy-btn')) return; // already has one
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = pre.querySelector('code');
+      const text = code ? code.textContent : pre.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+      });
+    });
+    pre.appendChild(btn);
+  });
 }
 
 async function renderMermaidBlocks() {
@@ -207,6 +227,64 @@ function appendChunk(chunk) {
 }
 
 // --- Hotkey Help Overlay (FEAT-5) ---
+// --- Compact Mode Toggle ---
+function toggleCompactMode() {
+  isCompactMode = !isCompactMode;
+  document.body.classList.toggle('compact-mode', isCompactMode);
+  const statusEl = document.getElementById('status-indicator');
+  const prevText = statusEl.textContent;
+  statusEl.textContent = isCompactMode ? '● Bullets' : '● Full';
+  statusEl.style.color = '#6a8a5a';
+  setTimeout(() => { statusEl.textContent = prevText; statusEl.style.color = ''; }, 1500);
+}
+
+// --- Font Size Cycle ---
+function cycleFontSize() {
+  const classes = ['font-sm', 'font-md', 'font-lg'];
+  const labels = ['SM', 'MD', 'LG'];
+  document.body.classList.remove(...classes);
+  fontSizeLevel = (fontSizeLevel + 1) % 3;
+  if (fontSizeLevel !== 1) document.body.classList.add(classes[fontSizeLevel]);
+  const statusEl = document.getElementById('status-indicator');
+  const prevText = statusEl.textContent;
+  statusEl.textContent = '● Font: ' + labels[fontSizeLevel];
+  statusEl.style.color = '#6a8a5a';
+  setTimeout(() => { statusEl.textContent = prevText; statusEl.style.color = ''; }, 1500);
+}
+
+// --- Auto-Scroll (Teleprompter) ---
+function toggleAutoScroll() {
+  if (autoScrollTimer) {
+    clearInterval(autoScrollTimer);
+    autoScrollTimer = null;
+    const statusEl = document.getElementById('status-indicator');
+    const prevText = statusEl.textContent;
+    statusEl.textContent = '● Scroll: Off';
+    statusEl.style.color = '#c8b88a';
+    setTimeout(() => { statusEl.textContent = prevText; statusEl.style.color = ''; }, 1500);
+  } else {
+    autoScrollTimer = setInterval(() => {
+      const box = document.getElementById('answer-box');
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight) return; // at bottom
+      box.scrollTop += 1;
+    }, 50); // ~20px/sec
+    const statusEl = document.getElementById('status-indicator');
+    const prevText = statusEl.textContent;
+    statusEl.textContent = '● Scroll: On';
+    statusEl.style.color = '#6a8a5a';
+    setTimeout(() => { statusEl.textContent = prevText; statusEl.style.color = ''; }, 1500);
+  }
+}
+
+// --- Opacity Pulse (briefly brighten on new answer) ---
+function triggerOpacityPulse() {
+  const overlay = document.getElementById('overlay');
+  overlay.classList.remove('answer-pulse');
+  void overlay.offsetWidth; // force reflow to restart animation
+  overlay.classList.add('answer-pulse');
+  setTimeout(() => overlay.classList.remove('answer-pulse'), 2600);
+}
+
 function toggleHotkeyHelp() {
   const panel = document.getElementById('hotkey-help');
   if (!panel) return;
@@ -232,18 +310,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       hint.style.display = (isClickThrough && followUp.style.display !== 'none') ? 'block' : 'none';
     }
   });
-  await listen('hotkey:opacity-up', () => adjustOpacity(0.05));
-  await listen('hotkey:opacity-down', () => adjustOpacity(-0.05));
   await listen('hotkey:copy-answer', copyAnswer);
   await listen('hotkey:copy-code', copyCode);
-  await listen('hotkey:scroll-down', () => {
-    const box = document.getElementById('answer-box');
-    box.scrollTop += 150;
-  });
-  await listen('hotkey:scroll-up', () => {
-    const box = document.getElementById('answer-box');
-    box.scrollTop -= 150;
-  });
+  await listen('hotkey:compact-mode', toggleCompactMode);
+  await listen('hotkey:font-size-cycle', cycleFontSize);
+  await listen('hotkey:auto-scroll', toggleAutoScroll);
+
+  // --- Hold-to-repeat for move, resize, scroll, opacity ---
+  // On press: fire action once + start interval. On release: stop interval.
+  const holdTimers = {};
+
+  async function holdable(eventName, action, intervalMs = 70) {
+    await listen(eventName, () => {
+      action(); // fire immediately
+      if (holdTimers[eventName]) clearInterval(holdTimers[eventName]);
+      holdTimers[eventName] = setInterval(action, intervalMs);
+    });
+    await listen(eventName + ':released', () => {
+      if (holdTimers[eventName]) {
+        clearInterval(holdTimers[eventName]);
+        delete holdTimers[eventName];
+      }
+    });
+  }
+
+  const invoke = window.__TAURI__.core.invoke;
+
+  // Move overlay (20px per tick)
+  await holdable('hotkey:move-up',    () => invoke('move_overlay', { dx: 0, dy: -20 }));
+  await holdable('hotkey:move-down',  () => invoke('move_overlay', { dx: 0, dy: 20 }));
+  await holdable('hotkey:move-left',  () => invoke('move_overlay', { dx: -20, dy: 0 }));
+  await holdable('hotkey:move-right', () => invoke('move_overlay', { dx: 20, dy: 0 }));
+
+  // Resize overlay (40x30 per tick)
+  await holdable('hotkey:resize-grow',   () => invoke('resize_overlay', { dw: 40, dh: 30 }));
+  await holdable('hotkey:resize-shrink', () => invoke('resize_overlay', { dw: -40, dh: -30 }));
+
+  // Opacity
+  await holdable('hotkey:opacity-up',   () => adjustOpacity(0.05), 100);
+  await holdable('hotkey:opacity-down', () => adjustOpacity(-0.05), 100);
+
+  // Scroll
+  await holdable('hotkey:scroll-down', () => {
+    document.getElementById('answer-box').scrollTop += 150;
+  }, 100);
+  await holdable('hotkey:scroll-up', () => {
+    document.getElementById('answer-box').scrollTop -= 150;
+  }, 100);
 
   // Model switching hotkeys (UX-4)
   await listen('hotkey:model-sol', () => {
@@ -332,6 +445,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     answerBox.innerHTML = '<p class="pipeline-status">Processing audio...</p>';
     document.getElementById('quick-actions').style.display = 'none';
     document.getElementById('follow-up').style.display = 'none';
+    triggerOpacityPulse();
   });
 
   await listen('pipeline:status', (event) => {
@@ -409,6 +523,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await listen('session:cleared', () => {
     currentAnswer = '';
+    window._lastTranscript = '';
+    window._lastExtraction = null;
+    if (autoScrollTimer) { clearInterval(autoScrollTimer); autoScrollTimer = null; }
     document.getElementById('answer-box').innerHTML =
       '<p class="placeholder-text">Session cleared. Press Ctrl+Shift+F6 to start recording</p>';
     document.getElementById('quick-actions').style.display = 'none';

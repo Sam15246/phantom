@@ -330,6 +330,7 @@ fn main() {
             overlay::set_click_through,
             overlay::toggle_overlay_visibility,
             overlay::move_overlay,
+            overlay::resize_overlay,
             overlay::open_settings,
             overlay::snap_to_webcam,
             config::load_config,
@@ -435,41 +436,8 @@ fn main() {
                 let _ = overlay::toggle_overlay_visibility(vis_handle.clone());
             });
 
-            // Handle move hotkeys
-            let h = handle.clone();
-            app.listen("hotkey:move-up", move |_| { let _ = overlay::move_overlay(h.clone(), 0, -20); });
-            let h = handle.clone();
-            app.listen("hotkey:move-down", move |_| { let _ = overlay::move_overlay(h.clone(), 0, 20); });
-            let h = handle.clone();
-            app.listen("hotkey:move-left", move |_| { let _ = overlay::move_overlay(h.clone(), -20, 0); });
-            let h = handle.clone();
-            app.listen("hotkey:move-right", move |_| { let _ = overlay::move_overlay(h.clone(), 20, 0); });
-
-            // Handle resize hotkeys
-            {
-                use tauri::Manager;
-                let h = handle.clone();
-                app.listen("hotkey:resize-grow", move |_| {
-                    if let Some(window) = h.get_webview_window("main") {
-                        if let Ok(size) = window.outer_size() {
-                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
-                                size.width + 40,
-                                size.height + 30,
-                            )));
-                        }
-                    }
-                });
-                let h = handle.clone();
-                app.listen("hotkey:resize-shrink", move |_| {
-                    if let Some(window) = h.get_webview_window("main") {
-                        if let Ok(size) = window.outer_size() {
-                            let new_w = if size.width > 280 { size.width - 40 } else { size.width };
-                            let new_h = if size.height > 200 { size.height - 30 } else { size.height };
-                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(new_w, new_h)));
-                        }
-                    }
-                });
-            }
+            // Move and resize hotkeys are handled in the frontend (app.js)
+            // with hold-to-repeat support via intervals
 
             // Handle open settings
             let settings_handle = handle.clone();
@@ -686,11 +654,25 @@ fn main() {
                 app.listen("hotkey:analyze", move |_| {
                     let ah = analyze_handle.clone();
                     let queue = ah.state::<screenshot::ScreenshotQueue>();
-                    let screenshots_b64 = screenshot::get_screenshots_base64(queue.inner());
 
-                    if screenshots_b64.is_empty() {
-                        let _ = ah.emit("pipeline:error", "No screenshots captured. Press Ctrl+Shift+F7 to take screenshots first.");
-                        return;
+                    // Smart analyze: if no screenshots queued, auto-capture one first
+                    {
+                        let q = queue.queue.lock().unwrap_or_else(|e| e.into_inner());
+                        if q.is_empty() {
+                            drop(q); // release lock before capture
+                            match screenshot::capture_screen(&ah) {
+                                Ok(png_bytes) => {
+                                    let mut q = queue.queue.lock().unwrap_or_else(|e| e.into_inner());
+                                    q.push(png_bytes);
+                                    let count = q.len();
+                                    let _ = ah.emit("screenshot:taken", count);
+                                }
+                                Err(e) => {
+                                    let _ = ah.emit("pipeline:error", &format!("Screenshot failed: {e}"));
+                                    return;
+                                }
+                            }
+                        }
                     }
 
                     tauri::async_runtime::spawn(async move {

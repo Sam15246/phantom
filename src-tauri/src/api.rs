@@ -927,7 +927,7 @@ pub async fn analyze_screenshots(
         "stream": true
     });
 
-    let _ = app.emit("answer:mode", "OA");
+    let _ = app.emit("answer:mode", current_mode);
 
     let response = client
         .post("https://api.openai.com/v1/chat/completions")

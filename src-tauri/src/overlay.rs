@@ -202,6 +202,27 @@ pub fn snap_to_webcam(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Resize overlay window by delta pixels
+#[tauri::command]
+pub fn resize_overlay(app: AppHandle, dw: i32, dh: i32) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Failed to get main window")?;
+
+    let size = window
+        .outer_size()
+        .map_err(|e| format!("Failed to get size: {e}"))?;
+
+    let new_w = (size.width as i32 + dw).max(280) as u32;
+    let new_h = (size.height as i32 + dh).max(200) as u32;
+
+    window
+        .set_size(tauri::Size::Physical(tauri::PhysicalSize::new(new_w, new_h)))
+        .map_err(|e| format!("Failed to resize: {e}"))?;
+
+    Ok(())
+}
+
 /// Open the settings window
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), String> {

@@ -106,6 +106,28 @@ html, body {
 
 #answer-box p {
   margin: 4px 0;
+  word-break: break-word;
+}
+
+#answer-box table {
+  width: 100%;
+  table-layout: fixed;
+  word-break: break-word;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+#answer-box th, #answer-box td {
+  padding: 4px 6px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+}
+
+#answer-box th {
+  background: var(--code-bg);
+  color: var(--text-accent);
+  font-size: 11px;
 }
 
 #answer-box pre {
@@ -113,16 +135,21 @@ html, body {
   border-radius: 4px;
   border-left: 2px solid var(--text-accent);
   padding: 10px 12px;
-  overflow-x: auto;
+  overflow-x: hidden;
   margin: 8px 0;
   font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  position: relative;
 }
 
 #answer-box code {
   font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 13.5px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 #answer-box p code {
@@ -253,10 +280,14 @@ blockquote.transcript-preview {
 /* --- Hotkey Help Overlay (FEAT-5) --- */
 #hotkey-help {
   position: absolute;
+  top: 40px;
   bottom: 80px;
   left: 12px;
   right: 12px;
   z-index: 100;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 #hotkey-help-inner {
@@ -294,12 +325,119 @@ blockquote.transcript-preview {
   padding-right: 14px;
 }
 
+.hotkey-section {
+  color: var(--text-accent);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding-top: 6px !important;
+  opacity: 0.7;
+}
+
+/* --- Per-block copy button --- */
+.code-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  cursor: pointer !important;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+#answer-box pre:hover .code-copy-btn {
+  opacity: 1;
+}
+
+.code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
 /* --- Pipeline status --- */
 .pipeline-status {
   color: var(--text-secondary);
   font-size: 12px;
   font-style: italic;
   padding: 8px 0;
+}
+
+/* --- Compact / Bullet Mode (Ctrl+Shift+G) --- */
+body.compact-mode #answer-box p {
+  display: none;
+}
+body.compact-mode #answer-box .debug-header {
+  display: block; /* keep debug header visible */
+}
+body.compact-mode #answer-box ul,
+body.compact-mode #answer-box ol {
+  padding-left: 14px;
+  margin: 2px 0;
+}
+body.compact-mode #answer-box li {
+  margin: 1px 0;
+}
+body.compact-mode #answer-box h1,
+body.compact-mode #answer-box h2,
+body.compact-mode #answer-box h3 {
+  margin: 6px 0 2px 0;
+  font-size: 13px;
+}
+body.compact-mode #answer-box pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+body.compact-mode #answer-box blockquote.transcript-preview {
+  display: block;
+}
+
+/* --- Font Size Variants (Ctrl+Shift+K) --- */
+body.font-lg #answer-box {
+  font-size: 17px;
+  line-height: 1.7;
+}
+body.font-lg #answer-box pre,
+body.font-lg #answer-box code {
+  font-size: 16px;
+}
+body.font-lg #answer-box h1,
+body.font-lg #answer-box h2,
+body.font-lg #answer-box h3 {
+  font-size: 18px;
+}
+
+body.font-sm #answer-box {
+  font-size: 12px;
+  line-height: 1.5;
+}
+body.font-sm #answer-box pre,
+body.font-sm #answer-box code {
+  font-size: 11px;
+}
+body.font-sm #answer-box h1,
+body.font-sm #answer-box h2,
+body.font-sm #answer-box h3 {
+  font-size: 13px;
+}
+
+/* --- Opacity Pulse (new answer arrives) --- */
+@keyframes pulse-in {
+  0%   { opacity: inherit; }
+  15%  { opacity: 1; }
+  100% { opacity: inherit; }
+}
+#overlay.answer-pulse {
+  animation: pulse-in 2.5s ease-out forwards;
 }
 
 /* --- Mermaid Diagrams --- */

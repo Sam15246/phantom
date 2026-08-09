@@ -11,7 +11,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, S
 ///   M (profiles), N (incognito), P (InPrivate), Q (close all),
 ///   R (hard refresh), S (save), T (reopen tab), U (source),
 ///   V (paste plain), W (close), Y (collections)
-/// Safe keys: F, G, H, K, O, X, Z, numbers, arrows, brackets, Backspace
+/// Safe keys: F, H, X, Z, numbers, arrows, brackets, Backspace
+/// NOT safe (verified): G (find prev), K (Edge dup tab), O (bookmark mgr)
 const HOTKEY_EVENTS: &[(&str, &str)] = &[
     ("Ctrl+Shift+F6",      "hotkey:toggle-recording"),     // Record/stop
     ("Ctrl+Shift+F7",      "hotkey:screenshot"),            // Grab screenshot
@@ -42,11 +43,22 @@ const HOTKEY_EVENTS: &[(&str, &str)] = &[
     ("Ctrl+Shift+[",       "hotkey:resize-shrink"),        // Make overlay smaller
     ("Ctrl+Shift+F8",      "hotkey:scroll-up"),            // Scroll answer up
     ("Ctrl+Shift+F9",      "hotkey:scroll-down"),          // Scroll answer down
+    ("Ctrl+Shift+6",       "hotkey:compact-mode"),         // Toggle compact/bullet mode
+    ("Ctrl+Shift+7",       "hotkey:font-size-cycle"),      // Cycle font size (S/M/L)
+    ("Ctrl+Shift+8",       "hotkey:auto-scroll"),          // Toggle auto-scroll (teleprompter)
 ];
 
 pub fn register_all(app: &AppHandle) -> Result<(), String> {
     let global_shortcut = app.global_shortcut();
     let mut failures: Vec<String> = Vec::new();
+
+    // Hotkeys that support hold-to-repeat (emit both pressed and released)
+    const HOLDABLE: &[&str] = &[
+        "hotkey:move-up", "hotkey:move-down", "hotkey:move-left", "hotkey:move-right",
+        "hotkey:resize-grow", "hotkey:resize-shrink",
+        "hotkey:opacity-up", "hotkey:opacity-down",
+        "hotkey:scroll-up", "hotkey:scroll-down",
+    ];
 
     for (shortcut_str, event_name) in HOTKEY_EVENTS {
         let shortcut: Shortcut = match shortcut_str.parse() {
@@ -59,11 +71,14 @@ pub fn register_all(app: &AppHandle) -> Result<(), String> {
 
         let event = event_name.to_string();
         let handle = app.clone();
+        let is_holdable = HOLDABLE.contains(event_name);
 
         match global_shortcut
             .on_shortcut(shortcut, move |_app, _shortcut, event_state: ShortcutEvent| {
                 if event_state.state == ShortcutState::Pressed {
                     let _ = handle.emit(&event, ());
+                } else if is_holdable && event_state.state == ShortcutState::Released {
+                    let _ = handle.emit(&format!("{}:released", event), ());
                 }
             })
         {
