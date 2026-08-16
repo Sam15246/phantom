@@ -2,8 +2,9 @@ use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowDisplayAffinity, SetWindowLongPtrW, GWL_EXSTYLE,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetWindowLongPtrW, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, GWL_EXSTYLE, HWND_BOTTOM, SWP_HIDEWINDOW, SWP_NOACTIVATE,
+    SW_HIDE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// WDA_EXCLUDEFROMCAPTURE = 0x00000011
@@ -27,6 +28,29 @@ pub fn apply_content_protection(app: &AppHandle) -> Result<(), String> {
         #[cfg(debug_assertions)]
         println!("Content protection applied successfully");
         Ok(())
+    }
+}
+
+/// Force-hide the overlay window via Win32 API.
+/// DestroyWindow fails silently from non-UI threads. Instead we:
+/// 1. ShowWindow(SW_HIDE) — removes from screen
+/// 2. SetWindowPos — shrink to 0x0, move off-screen, push to bottom z-order
+/// This works cross-thread and eliminates the ghost frame.
+#[cfg(target_os = "windows")]
+pub fn force_hide_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                ShowWindow(hwnd.0, SW_HIDE);
+                SetWindowPos(
+                    hwnd.0,
+                    HWND_BOTTOM,     // push behind everything
+                    -10000, -10000,  // move way off-screen
+                    0, 0,            // shrink to zero size
+                    SWP_HIDEWINDOW | SWP_NOACTIVATE,
+                );
+            }
+        }
     }
 }
 

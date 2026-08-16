@@ -45,7 +45,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
 
     let _ = app.emit("pipeline:started", ());
 
-    let cfg = config::load_config_internal()?;
+    let cfg = app.state::<config::ConfigCache>().get()?;
 
     if cfg.openai_api_key.is_empty() {
         let _ = app.emit("pipeline:error", "OpenAI API key not set. Press Ctrl+Shift+, to open settings.");
@@ -152,7 +152,7 @@ async fn ask_followup(
 ) -> Result<(), String> {
     use tauri::Manager;
 
-    let cfg = config::load_config_internal()?;
+    let cfg = app.state::<config::ConfigCache>().get()?;
     if cfg.openai_api_key.is_empty() {
         return Err("OpenAI API key not set".into());
     }
@@ -213,7 +213,7 @@ async fn ask_followup(
 #[tauri::command]
 async fn speak_answer(app: tauri::AppHandle, text: String) -> Result<String, String> {
     use tauri::Manager;
-    let cfg = config::load_config_internal()?;
+    let cfg = app.state::<config::ConfigCache>().get()?;
     if !cfg.tts_enabled {
         return Err("TTS is disabled".into());
     }
@@ -284,7 +284,7 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
         return Err("No conversation history to summarize".into());
     }
 
-    let cfg = config::load_config_internal()?;
+    let cfg = app.state::<config::ConfigCache>().get()?;
     if cfg.openai_api_key.is_empty() {
         return Err("OpenAI API key not set".into());
     }
@@ -326,6 +326,7 @@ fn main() {
         .manage(ClickThroughState::new())
         .manage(screenshot::ScreenshotQueue::new())
         .manage(api::SharedHttpClient::new())
+        .manage(config::ConfigCache::new())
         .invoke_handler(tauri::generate_handler![
             overlay::set_click_through,
             overlay::toggle_overlay_visibility,
@@ -369,6 +370,21 @@ fn main() {
                 let _ = handle.emit("pipeline:error", format!("Hotkey registration failed: {e}"));
             }
 
+            // Pre-warm HTTP connections (TLS handshake in background)
+            {
+                use tauri::Manager;
+                let client = handle.state::<api::SharedHttpClient>().client.clone();
+                tauri::async_runtime::spawn(async move {
+                    let targets = [
+                        "https://api.openai.com",
+                        "https://api.groq.com",
+                    ];
+                    for url in targets {
+                        let _ = client.head(url).send().await;
+                    }
+                });
+            }
+
             // Handle emergency exit (Ctrl+Shift+Q)
             let exit_handle = handle.clone();
             app.listen("hotkey:emergency-exit", move |_| {
@@ -405,7 +421,19 @@ fn main() {
                 }
 
                 hotkeys::unregister_all(&exit_handle);
-                std::process::exit(0);
+                // Force-hide via Win32 — ShowWindow + SetWindowPos works cross-thread
+                // (DestroyWindow silently fails from non-UI threads)
+                overlay::force_hide_window(&exit_handle);
+                // Also hide tray icon
+                if let Some(tray) = exit_handle.tray_by_id("main") {
+                    let _ = tray.set_visible(false);
+                }
+                // Use Tauri's exit for proper cleanup instead of std::process::exit
+                let handle_for_exit = exit_handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    handle_for_exit.exit(0);
+                });
             });
 
             // Handle toggle click-through (Ctrl+Shift+F4)
@@ -459,7 +487,7 @@ fn main() {
                     let history = cycle_handle.state::<ConversationHistory>();
                     let mut locked = history.locked_mode.lock().unwrap_or_else(|e| e.into_inner());
 
-                    // Cycle: None → dsa → oa → system-design → lld → ai-interview → None
+                    // Cycle: None → dsa → oa → system-design → lld → ai-interview → ai-ml → cloud → backend → behavioral → None
                     let next = match locked.as_deref() {
                         None              => Some("dsa".to_string()),
                         Some("dsa")       => Some("oa".to_string()),
@@ -467,7 +495,10 @@ fn main() {
                         Some("system-design") => Some("lld".to_string()),
                         Some("lld")       => Some("ai-interview".to_string()),
                         Some("ai-interview") => Some("ai-ml".to_string()),
-                        Some("ai-ml")     => None,
+                        Some("ai-ml")     => Some("cloud".to_string()),
+                        Some("cloud")     => Some("backend".to_string()),
+                        Some("backend")   => Some("behavioral".to_string()),
+                        Some("behavioral") => None,
                         Some(_)           => None,
                     };
 
@@ -529,7 +560,7 @@ fn main() {
                             }
                         });
                     } else {
-                        let audio_source = config::load_config_internal()
+                        let audio_source = rec_handle.state::<config::ConfigCache>().get()
                             .map(|c| c.audio_source)
                             .unwrap_or_else(|_| "both".to_string());
                         match engine.start_recording(&audio_source) {
@@ -569,7 +600,8 @@ fn main() {
                 if !messages.is_empty() {
                     let summary_handle = clear_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Ok(cfg) = config::load_config_internal() {
+                        use tauri::Manager;
+                        if let Ok(cfg) = summary_handle.state::<config::ConfigCache>().get() {
                             if !cfg.openai_api_key.is_empty() {
                                 let mut conversation = String::new();
                                 for msg in &messages {
@@ -690,7 +722,7 @@ fn main() {
                         let _ = ah.emit("pipeline:started", ());
                         let _ = ah.emit("pipeline:status", "Analyzing screenshots...");
 
-                        let cfg = match config::load_config_internal() {
+                        let cfg = match ah.state::<config::ConfigCache>().get() {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = ah.emit("pipeline:error", &format!("Config error: {e}"));
@@ -783,9 +815,16 @@ fn main() {
                     .tooltip("Windows Audio Device Manager")
                     .menu(&menu)
                     .on_menu_event(move |tray_app, event| {
+                        use tauri::Manager;
                         if event.id() == "quit" {
                             hotkeys::unregister_all(tray_app);
-                            std::process::exit(0);
+                            if let Some(win) = tray_app.get_webview_window("main") {
+                                let _ = win.close();
+                            }
+                            std::thread::spawn(|| {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                std::process::exit(0);
+                            });
                         }
                     })
                     .build(app)

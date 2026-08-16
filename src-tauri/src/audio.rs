@@ -196,7 +196,11 @@ impl AudioEngine {
         let channels = *self.channels.lock().unwrap_or_else(|e| e.into_inner());
 
         let mixed = mix_audio(&system, &mic);
-        encode_wav(&mixed, sample_rate, channels).unwrap_or_default()
+
+        // Trim leading/trailing silence — saves transcription time
+        let trimmed = trim_silence(&mixed, sample_rate);
+
+        encode_wav(trimmed, sample_rate, channels).unwrap_or_default()
     }
 }
 
@@ -274,6 +278,55 @@ fn build_input_stream_f32(
             Box::new(OwnedStream(s)) as Box<dyn StreamHandle>
         })
         .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// downsample — linear interpolation resampler
+// ---------------------------------------------------------------------------
+
+fn downsample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if from_rate == to_rate || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let ratio = from_rate as f64 / to_rate as f64;
+    let out_len = (samples.len() as f64 / ratio) as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let src_pos = i as f64 * ratio;
+        let idx = src_pos as usize;
+        let frac = src_pos - idx as f64;
+        let a = samples[idx];
+        let b = samples.get(idx + 1).copied().unwrap_or(a);
+        out.push(a + (b - a) * frac as f32);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// trim_silence — remove leading/trailing dead air
+// ---------------------------------------------------------------------------
+
+fn trim_silence(samples: &[f32], sample_rate: u32) -> &[f32] {
+    if samples.is_empty() {
+        return samples;
+    }
+    // -40dB threshold ≈ amplitude 0.01 — only trims actual dead silence
+    let threshold: f32 = 0.01;
+    // 300ms safety buffer on each side to avoid clipping soft speech
+    let buffer = (sample_rate as usize * 300) / 1000;
+
+    let first = samples.iter().position(|&s| s.abs() > threshold);
+    let last = samples.iter().rposition(|&s| s.abs() > threshold);
+
+    match (first, last) {
+        (Some(f), Some(l)) => {
+            let start = f.saturating_sub(buffer);
+            let end = (l + buffer + 1).min(samples.len());
+            &samples[start..end]
+        }
+        // Entire audio is below threshold — return as-is (don't trim to nothing)
+        _ => samples,
+    }
 }
 
 // ---------------------------------------------------------------------------

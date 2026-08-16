@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -112,12 +113,46 @@ pub fn load_config() -> Result<PhantomConfig, String> {
 }
 
 #[tauri::command]
-pub fn save_config(config: PhantomConfig) -> Result<(), String> {
+pub fn save_config(config: PhantomConfig, cache: tauri::State<'_, ConfigCache>) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(&config).map_err(|e| format!("Serialize error: {e}"))?;
     let encrypted = encrypt(&json)?;
     let path = config_path();
     fs::write(&path, encrypted).map_err(|e| format!("Write error: {e}"))?;
+    cache.invalidate(&config);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ConfigCache — avoids re-reading + decrypting config from disk every pipeline
+// ---------------------------------------------------------------------------
+
+pub struct ConfigCache {
+    inner: Mutex<Option<PhantomConfig>>,
+}
+
+impl ConfigCache {
+    pub fn new() -> Self {
+        let config = load_config_internal().ok();
+        Self { inner: Mutex::new(config) }
+    }
+
+    /// Get cached config, falling back to disk if cache is empty
+    pub fn get(&self) -> Result<PhantomConfig, String> {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref cfg) = *guard {
+            Ok(cfg.clone())
+        } else {
+            drop(guard);
+            let cfg = load_config_internal()?;
+            *self.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(cfg.clone());
+            Ok(cfg)
+        }
+    }
+
+    /// Invalidate cache — call after save_config
+    pub fn invalidate(&self, new_config: &PhantomConfig) {
+        *self.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(new_config.clone());
+    }
 }
 
 /// Extract text from a PDF file given its bytes (base64 encoded from frontend)

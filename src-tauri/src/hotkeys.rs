@@ -33,7 +33,7 @@ const HOTKEY_EVENTS: &[(&str, &str)] = &[
     ("Ctrl+Shift+1",       "hotkey:model-sol"),            // Model selection
     ("Ctrl+Shift+2",       "hotkey:model-terra"),
     ("Ctrl+Shift+3",       "hotkey:model-luna"),
-    ("Ctrl+Shift+4",       "hotkey:mode-cycle"),            // Cycle mode lock (dsa/oa/sd/lld/ai-interview)
+    ("Ctrl+Shift+4",       "hotkey:mode-cycle"),            // Cycle mode lock (dsa/oa/sd/lld/ai-int/ai-ml/cloud/backend/behavioral)
     ("Ctrl+Shift+5",       "hotkey:mode-unlock"),           // Unlock mode (back to auto-detect)
     ("Ctrl+Shift+Backspace","hotkey:clear-session"),       // Clear session + screenshots
     ("Ctrl+Shift+F5",      "hotkey:clear-screenshots"),    // Clear screenshots only
