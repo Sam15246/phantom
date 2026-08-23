@@ -1042,6 +1042,14 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
         prompt.push_str(&format!("\n\n=== TARGET ROLE (tailor your answers toward this) ===\n{job_description}"));
     }
 
+    // Inject detailed experience context for modes that benefit from project-level depth
+    if needs_resume {
+        let experience = crate::experience::experience_for_mode(mode);
+        if !experience.is_empty() {
+            prompt.push_str(&format!("\n\n=== DETAILED EXPERIENCE CONTEXT ===\nThe following contains detailed information about your professional experience, specific projects, domain expertise and technical depth. Use this to give answers grounded in your ACTUAL work — specific APIs, state codes, orchestration flows, testing strategies, tools you've used.\n\n{experience}"));
+        }
+    }
+
     // Honesty framing — match confidence level to actual experience
     if needs_resume && !resume.is_empty() {
         prompt.push_str("\n\nCRITICAL — Honest experience framing:

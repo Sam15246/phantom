@@ -487,17 +487,19 @@ fn main() {
                     let history = cycle_handle.state::<ConversationHistory>();
                     let mut locked = history.locked_mode.lock().unwrap_or_else(|e| e.into_inner());
 
-                    // Cycle: None → dsa → oa → system-design → lld → ai-interview → ai-ml → cloud → backend → behavioral → None
+                    // Cycle: None → dsa → oa → system-design → lld → ai-interview → project-deep-dive → ai-ml → cloud → backend → qa → behavioral → None
                     let next = match locked.as_deref() {
                         None              => Some("dsa".to_string()),
                         Some("dsa")       => Some("oa".to_string()),
                         Some("oa")        => Some("system-design".to_string()),
                         Some("system-design") => Some("lld".to_string()),
                         Some("lld")       => Some("ai-interview".to_string()),
-                        Some("ai-interview") => Some("ai-ml".to_string()),
+                        Some("ai-interview") => Some("project-deep-dive".to_string()),
+                        Some("project-deep-dive") => Some("ai-ml".to_string()),
                         Some("ai-ml")     => Some("cloud".to_string()),
                         Some("cloud")     => Some("backend".to_string()),
-                        Some("backend")   => Some("behavioral".to_string()),
+                        Some("backend")   => Some("qa".to_string()),
+                        Some("qa")        => Some("behavioral".to_string()),
                         Some("behavioral") => None,
                         Some(_)           => None,
                     };
@@ -773,7 +775,7 @@ fn main() {
                                 // Only set last_mode to OA if not locked and not in a live interview context
                                 let is_locked = history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).is_some();
                                 if !is_locked {
-                                    let is_live = matches!(current_mode.as_str(), "dsa" | "ai-interview" | "system-design" | "lld" | "behavioral" | "ai-ml" | "backend" | "java" | "python" | "dbms" | "cloud");
+                                    let is_live = matches!(current_mode.as_str(), "dsa" | "ai-interview" | "system-design" | "lld" | "behavioral" | "ai-ml" | "backend" | "java" | "python" | "dbms" | "cloud" | "qa" | "project-deep-dive");
                                     if !is_live {
                                         *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "OA".to_string();
                                     }
