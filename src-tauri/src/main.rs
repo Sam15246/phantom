@@ -6,7 +6,7 @@ mod config;
 mod hotkeys;
 mod overlay;
 mod screenshot;
-
+mod experience;
 
 use tauri::{Emitter, Listener};
 
