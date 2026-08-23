@@ -377,18 +377,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('mode-label').textContent = 'LUNA (gpt-5.6-luna)';
   });
   // Mode lock cycle (Ctrl+Shift+4) and unlock (Ctrl+Shift+5)
+  const modeDisplayNames = {
+    'dsa': 'DSA', 'oa': 'OA', 'system-design': 'SYS-DESIGN',
+    'lld': 'LLD', 'ai-interview': 'AI-INT', 'project-deep-dive': 'PROJ-DIVE',
+    'ai-ml': 'AI-ML', 'cloud': 'CLOUD', 'backend': 'BACKEND',
+    'qa': 'QA', 'behavioral': 'BEHAVIORAL',
+    'java': 'JAVA', 'python': 'PYTHON', 'dbms': 'DBMS',
+  };
   await listen('mode:locked', (event) => {
     const mode = event.payload;
     const modeLabel = document.getElementById('mode-label');
     const statusEl = document.getElementById('status-indicator');
+    const displayName = modeDisplayNames[mode] || mode.toUpperCase();
 
     if (mode === 'auto') {
       modeLabel.textContent = 'Auto-detect';
       statusEl.textContent = '● Auto Mode';
       statusEl.style.color = '#6a8a5a';
     } else {
-      modeLabel.textContent = mode.toUpperCase() + ' (locked)';
-      statusEl.textContent = '● ' + mode.toUpperCase() + ' Locked';
+      modeLabel.textContent = displayName + ' (locked)';
+      statusEl.textContent = '● ' + displayName + ' Locked';
       statusEl.style.color = '#c8b88a';
     }
     setTimeout(() => {
@@ -464,14 +472,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await listen('pipeline:extraction', (event) => {
     const data = event.payload;
-    const mode = (data.mode || 'general').toUpperCase();
+    const modeRaw = data.mode || 'general';
+    const mode = modeDisplayNames[modeRaw] || modeRaw.toUpperCase();
     document.getElementById('mode-label').textContent = mode;
     window._lastExtraction = { question: data.question, mode: mode };
   });
 
   await listen('answer:mode', (event) => {
+    const modeRaw = event.payload || 'general';
     document.getElementById('mode-label').textContent =
-      (event.payload || 'general').toUpperCase();
+      modeDisplayNames[modeRaw] || modeRaw.toUpperCase();
   });
 
   await listen('answer:chunk', (event) => {
