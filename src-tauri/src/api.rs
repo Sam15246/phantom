@@ -1023,7 +1023,7 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
     }
 
     // Jargon safety — never use terms the candidate can't explain if cross-questioned
-    if matches!(mode, "ai-ml" | "cloud" | "system-design" | "backend" | "qa") {
+    if matches!(mode, "ai-ml" | "cloud" | "system-design" | "backend" | "qa" | "project-deep-dive") {
         prompt.push_str("\n\nCRITICAL — Jargon safety rule:
 - EVERY technical term you mention, you must explain in 1 simple sentence immediately after. If you can't explain it simply, don't mention it.
 - Prefer fewer concepts explained well over many concepts name-dropped. An interviewer who hears 'PagedAttention' WILL ask 'how does that work?' — so only mention it if the answer also explains it.
