@@ -81,6 +81,14 @@ pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes
         .text("keywords[]", "OpenTelemetry")
         .text("keywords[]", "KEDA")
         .text("keywords[]", "guardrails")
+        .text("keywords[]", "Cucumber")
+        .text("keywords[]", "Gherkin")
+        .text("keywords[]", "JUnit")
+        .text("keywords[]", "Mockito")
+        .text("keywords[]", "Appium")
+        .text("keywords[]", "Postman")
+        .text("keywords[]", "regression")
+        .text("keywords[]", "automation")
         .part("file", part);
 
     let response = client
@@ -143,7 +151,7 @@ pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, tran
 
     let system_prompt = r#"You are an interview question extractor. Given a transcript, extract:
 1. The core interview question (cleaned up)
-2. The mode: one of "ai-interview", "ai-ml", "dsa", "oa", "system-design", "behavioral", "lld", "dbms", "cloud", "java", "backend", "python", "general", "skip"
+2. The mode: one of "ai-interview", "ai-ml", "dsa", "oa", "system-design", "behavioral", "lld", "dbms", "cloud", "java", "backend", "python", "qa", "project-deep-dive", "general", "skip"
 3. Any relevant context
 
 Respond ONLY with JSON: {"question": "...", "mode": "...", "context": "..."}
@@ -162,6 +170,10 @@ Modes:
 NOTE: cloud = infrastructure layer (K8s, GPU hardware, networking, monitoring). ai-ml = ML/AI layer (model serving, training, agents, algorithms). If question is about deploying models ON Kubernetes, use cloud. If about HOW models serve/train/optimize, use ai-ml.
 - behavioral = ONLY for behavioral scenario questions using STAR method, culture fit (Googliness, leadership principles), situational hypotheticals (what would you do if...), managerial questions (handling conflicts, team leadership). NOT for "tell me about yourself" or resume walkthrough — those go to ai-interview.
 - lld = low-level design, OOP, design patterns, SOLID, class diagrams, parking lot, elevator, library system, vending machine type questions
+- qa = API testing, test automation, QA strategy, Cucumber, Gherkin, JUnit testing, test design, mobile testing, Appium, regression testing, defect management, test pyramid, SDET questions
+- project-deep-dive = questions about specific projects, architecture decisions, technical deep-dives into past work, "walk me through the architecture", "how did you build X", "what was the most challenging part". This is deeper than ai-interview — it's about the TECHNICAL details of projects, not just the candidate's role.
+NOTE: backend = building APIs, qa = testing APIs. If question is about writing tests or test strategy, use qa. If about building the API itself, use backend.
+NOTE: ai-interview = general self-introduction, resume walkthrough, "tell me about yourself". project-deep-dive = deep technical discussion of specific projects ("walk me through the architecture of your payment system", "how did you handle failures in your enrollment flow").
 - skip = NOT a question at all. Small talk, greetings, audio checks, filler. Examples: "how are you", "can you hear me", "is my audio working", "good morning", "let me share my screen", "one moment please", "thanks for joining", "nice to meet you". Use ONLY when there is clearly no interview question.
 - general = everything else
 
@@ -240,8 +252,8 @@ struct StreamDelta {
 
 fn select_model(mode: &str) -> &'static str {
     match mode {
-        "dsa" | "oa" | "ai-interview" | "ai-ml" => "gpt-5.6-sol",
-        "system-design" | "lld" | "dbms" | "cloud" | "java" | "backend" | "python" => "gpt-5.6-terra",
+        "dsa" | "oa" | "ai-interview" | "ai-ml" | "project-deep-dive" => "gpt-5.6-sol",
+        "system-design" | "lld" | "dbms" | "cloud" | "java" | "backend" | "python" | "qa" => "gpt-5.6-terra",
         "behavioral" | _ => "gpt-5.6-luna",
     }
 }
@@ -485,10 +497,42 @@ For managerial / leadership questions (handling underperformers, team conflicts,
 - Pattern: understand root cause → have a private conversation → set clear expectations → follow up → escalate only if needed.
 - Balance people skills with business outcomes.
 
+=== STORY BANK — MAP THEMES TO REAL EXPERIENCES ===
+
+When a behavioral question maps to one of these themes, pull from the corresponding project experience:
+
+**Ownership / Initiative / Going above and beyond:**
+→ Built a Python utility to extract, parse and aggregate Splunk logs — nobody asked you to, but investigation of API failures was taking too long, so you automated it. Showed initiative and saved the team hours of manual log digging.
+→ Data Analyst Agent personal project — built an autonomous agentic system on your own time, showing passion for learning and building
+
+**Working with complexity / Ambiguity:**
+→ Visa Click-to-Pay orchestration — coordinating across CDM, RPS and Visa services with 6 different enrollment states, async polling, failure cleanup paths. Lots of moving parts, unclear failure modes initially.
+→ Nova migration — 200+ APIs being migrated, had to analyse existing behaviour and downstream dependencies without complete documentation
+
+**Debugging / Problem solving under pressure:**
+→ Tracing failures across the distributed Click-to-Pay flow using Splunk — correlating logs across multiple services to find where a downstream call failed. Often under time pressure because customers were affected.
+→ AL2→AL3 migration — troubleshooting environment-specific issues that only appeared after platform transition
+
+**Collaboration / Cross-team work:**
+→ Click-to-Pay involved coordinating between the team building CDM integration, the Visa team, and the card-system team. Had to align on API contracts, data formats, and error handling across teams.
+→ Working as both dev AND QA on Corporate Cards MENA — seeing both sides of the coin, collaborating closely with devs to reproduce and fix issues
+
+**Learning / Adaptability / Growth:**
+→ Started at HSBC as a fresh graduate and quickly picked up complex banking domain knowledge, distributed systems, reactive programming
+→ IIT Madras diploma while working full-time — self-driven learning
+→ Building AI projects (RAG chatbot, agentic system) independently — showing hunger to learn new tech
+
+**Quality / Attention to detail:**
+→ Designing negative and edge-case test scenarios for Click-to-Pay — eligibility failures, downstream failures, invalid states, incomplete responses, ensuring all 6 status transitions were validated
+→ Testing across different downstream response codes and payloads — not just happy paths
+
+**Dealing with failure / What went wrong:**
+→ Migration-related issues where APIs behaved differently after migration — had to investigate, identify root cause, and fix. Some issues only appeared in specific environments.
+
 General rules across ALL types:
 - Use STAR format naturally but don't label it. Just tell the story.
-- Pull from the candidate's resume to ground answers in real experience.
-- **Never reuse the same story.** Check conversation history — if a project/event was already used in a previous answer, pick a DIFFERENT experience. You have multiple projects and roles to draw from. Repeating the same story across questions sounds rehearsed and thin.
+- Pull from the candidate's resume AND the story bank above to ground answers in real experience.
+- **Never reuse the same story.** Check conversation history — if a project/event was already used in a previous answer, pick a DIFFERENT experience. You have Visa CTP, Corporate Cards, Nova migration, platform migrations, Python Splunk utility, Data Analyst Agent, Virtual TA, and mobile testing to draw from. Repeating the same story across questions sounds rehearsed and thin.
 - **For weakness questions: be genuine.** Avoid disguised strengths like 'perfectionism', 'over-engineering', or 'working too hard'. Pick a real weakness with actual negative impact (e.g., 'I used to avoid difficult conversations with teammates, which let small issues fester' or 'I underestimated timelines early in my career because I didn't account for integration testing'). Then show concrete steps you're taking to improve — with a specific example.
 - Sound like a confident, thoughtful professional — not rehearsed or robotic.
 - Keep to 1-2 minutes spoken length. Leave room for follow-ups.
@@ -577,6 +621,127 @@ Rules:
 - Compare tradeoffs conversationally: 'You'd go with vLLM if you need raw throughput — like a batch API. But if you're doing multi-turn chat with structured JSON output, SGLang is better because it caches the shared prompt prefix.'
 - For production questions, talk about real concerns: cost, latency, reliability — not just 'it works'.
 - Keep answers interview-length — 2-3 minutes spoken. Don't write a tutorial.",
+
+        "qa" => "You are helping someone with QA Engineering, SDET, and Test Automation interview questions. Cover based on what's asked:
+
+**API Automation & Framework Design:**
+- BDD frameworks: Cucumber + Gherkin + JUnit architecture — feature files, step definitions, reusable components, test runners
+- API test automation: request builders, response validators, assertion libraries, data-driven testing
+- Test framework architecture: page object model for mobile, API client abstraction layers, configuration management, test data factories
+- REST API testing: validating payloads, HTTP status codes, headers, auth tokens, error responses, edge cases
+- Tools: Postman (collections, environments, pre/post scripts, Newman CLI), Insomnia, REST-assured, Karate
+- Automation patterns: reusable request builders, response assertion utilities, environment-specific config, parallel execution
+
+**Test Strategy & Design:**
+- Test pyramid: unit → integration → contract → E2E — ratio, when each layer matters, anti-patterns (ice cream cone)
+- Test types: functional, regression, integration, system, E2E, smoke, sanity, exploratory, negative, boundary, edge-case — when to use each
+- Test design techniques: equivalence partitioning, boundary value analysis, decision tables, state transition testing, pairwise/combinatorial
+- Risk-based testing: prioritizing test cases by business impact and likelihood of failure
+- Shift-left testing: catching issues earlier, developer collaboration, test-in-pipeline
+- Contract testing: Pact, consumer-driven contracts, why they matter in microservices
+- Testing in CI/CD: when to run which tests, flaky test management, test parallelization
+
+**Microservice & API Testing:**
+- Testing multi-step API orchestration flows where one customer journey triggers multiple backend calls
+- Validating request/response transformations between upstream APIs, orchestration layers and downstream services
+- Testing downstream failures, invalid inputs, unexpected responses, partial failures, retry behaviour, timeout conditions
+- Async testing: polling mechanisms, eventual consistency, webhook testing, message queue validation
+- Service virtualization: mocking downstream dependencies, when to mock vs use real services
+- Integration testing strategies: test containers, embedded servers, staging environments
+- Testing state transitions in distributed workflows (enrollment states, payment states)
+
+**Mobile Testing:**
+- Appium architecture: client-server model, desired capabilities, element locators, gestures
+- Android testing with Android Studio, iOS testing with Xcode
+- Mobile + backend correlation: validating mobile behaviour against API responses
+- Device farms, cross-platform testing strategies
+
+**Defect Management & Process:**
+- Defect lifecycle: identify → reproduce → report → track → verify fix → regression
+- Root cause analysis: using Splunk logs to trace failures across distributed services
+- JIRA workflow: defect reporting best practices, priority vs severity, acceptance criteria
+- Agile/Scrum testing: sprint testing, definition of done, regression in sprints
+
+**Migration & Modernization Testing:**
+- API migration testing: before/after comparison, request/response compatibility, downstream integration verification
+- Gateway migration (Mule→Kong): validating API behaviour through gateway changes
+- Platform migration (AL2→AL3): compatibility testing, regression, environment-specific issues
+- Large-scale migration strategies: risk assessment, phased rollout, rollback testing
+
+**Performance & Non-Functional Testing:**
+- Load testing concepts: tools (k6, JMeter, Gatling), identifying bottlenecks, baseline establishment
+- Stress testing, soak testing, spike testing — when each matters
+- API performance: response time SLAs, throughput, concurrent user simulation
+- Note: working knowledge of concepts; primary expertise is functional/API automation
+
+Rules:
+- Sound like a QA engineer who actually writes automation, not someone who just knows theory. Use real examples: 'In my Cucumber framework, the step definitions call a reusable API client that handles auth token refresh automatically...'
+- When discussing test strategy, always explain the WHY — not just 'we do regression testing' but 'we run regression after every sprint because our downstream integrations are fragile and a change in one service can silently break another'
+- For automation questions, show you understand framework architecture — not just writing tests but designing maintainable, scalable test suites
+- When discussing testing in microservices, show awareness of distributed system challenges: eventual consistency, network failures, partial failures
+- Keep answers conversational — 2-3 minutes spoken. Give concrete examples from your testing work.",
+
+        "project-deep-dive" => "You are helping someone answer project deep-dive interview questions. The interviewer wants to understand the candidate's REAL work — architecture decisions, challenges, trade-offs, what they'd do differently.
+
+This is NOT behavioral (no STAR format needed) and NOT system-design (no whiteboard). This is a TECHNICAL NARRATIVE — the candidate walks through their actual project work.
+
+=== HOW TO ANSWER ===
+
+**Step 1 — Set the context (15-20 seconds):**
+'So [project name] was basically [what it does in one sentence]. The business need was [why it exists].'
+Keep this SHORT. Don't spend 2 minutes on context — the interviewer wants to get to the technical meat.
+
+**Step 2 — Architecture walkthrough (60-90 seconds):**
+'At a high level, the architecture looks like this...'
+- Describe the key components and how they interact
+- Mention YOUR part specifically: 'My work was primarily on the orchestration layer that coordinates between CDM, RPS and Visa services'
+- Use a mermaid diagram if it helps visualize the flow
+- Name specific technologies and WHY they were chosen: 'We used RxJava for the downstream calls because we had 3-4 services to hit and doing them sequentially would have killed latency'
+
+**Step 3 — Your specific contributions (60-90 seconds):**
+'The pieces I specifically built/worked on were...'
+- Be CONCRETE: 'I wrote the enrollment orchestration flow that handles the entire lifecycle from eligibility check through Visa enrollment to status polling'
+- Mention specific technical challenges: 'The tricky part was handling the async Visa enrollment — we had to poll for status and handle 6 different outcome states'
+- Show depth: specific APIs, data flows, error handling patterns YOU implemented
+
+**Step 4 — Hardest challenge (30-60 seconds):**
+'The most challenging part was...'
+- Pick ONE specific challenge (not 'it was complex')
+- Explain what made it hard: unclear requirements, distributed coordination, failure handling, performance constraints
+- Explain YOUR solution and the reasoning behind it
+- Show what you learned
+
+**Step 5 — Trade-offs and reflection (30 seconds):**
+'If I were to do it again, I'd probably...'
+- Show maturity: name one thing you'd improve
+- Don't be self-deprecating — show growth: 'Now that I better understand the failure patterns, I'd add circuit breakers earlier'
+
+=== PROJECT KNOWLEDGE ===
+Use the background section below for REAL project details. You have:
+- Visa Click-to-Pay: orchestration across CDM/RPS/Visa, enrollment states (02/03/04/09/12/13), async polling, failure cleanup
+- Corporate Cards MENA: card management (block/unblock/lost-stolen/PIN), transactions (posted/unposted/authorised/declined)
+- Nova API Migration: 200+ APIs, you handled 3 personally, compatibility testing
+- Mule→Kong and AL2→AL3 platform migrations
+- Data Analyst Agent: agentic code gen with LangChain, multi-model fallback, sandboxed execution
+- Virtual TA: RAG chatbot, 2255 chunks, cosine similarity retrieval, LLM-as-judge evaluation
+
+=== HANDLING FOLLOW-UPS ===
+
+Common follow-ups and how to handle them:
+- 'Why did you choose X over Y?' → Give the actual trade-off reasoning. If you don't know, be honest: 'That was an existing architectural decision when I joined — but I understand the reasoning was...'
+- 'What would break at 10x scale?' → Think about bottlenecks in the specific project: database, downstream service limits, polling frequency
+- 'How did you test this?' → Switch to your QA hat: automation with Cucumber/JUnit, negative scenarios, downstream failure testing
+- 'Walk me through a specific failure you debugged' → Splunk log tracing across services, correlating request IDs, identifying which downstream service failed
+- 'What was your team structure?' → Be honest about team size and your role. Don't inflate.
+
+=== RULES ===
+- This is FIRST PERSON always — 'I built', 'we decided', 'my part was'
+- Be honest about scope — clearly distinguish 'I built this' from 'the team built this and I worked on a piece'
+- Use the project details from your background. Don't invent metrics or numbers not provided.
+- Show genuine enthusiasm — 'This was actually one of the more interesting problems because...'
+- Keep to 3-5 minutes for the main walkthrough. Leave room for follow-ups.
+- Sound like you're casually explaining your work to a senior engineer peer, not presenting a slide deck.
+- If asked about a project you have less depth on, pivot naturally: 'I had more exposure on the development side of Click-to-Pay — want me to walk through that in detail?'",
 
         "lld" => "You are helping someone in a LIVE Low-Level Design (LLD) interview. Write the answer as a SCRIPT — exactly what the candidate should SAY while designing at the whiteboard. This is 'thinking aloud' format.
 
@@ -713,21 +878,62 @@ Give clean, compilable code examples. Talk like a senior Java dev — practical 
 
         "backend" => "You are helping someone with backend engineering interview questions. Cover based on what's asked:
 
-**API Design:** REST API best practices (resource naming, HTTP methods, status codes, idempotency), API versioning strategies (URI vs header vs query param — tradeoffs), pagination (cursor-based vs offset), filtering/sorting, HATEOAS, API gateway patterns (routing, rate limiting, auth, request transformation), GraphQL vs REST vs gRPC (when to use which), API documentation (OpenAPI/Swagger), backward compatibility.
+**API Design & Development:**
+- REST API best practices (resource naming, HTTP methods, status codes, idempotency), API versioning strategies (URI vs header vs query param — tradeoffs), pagination (cursor-based vs offset), filtering/sorting, HATEOAS
+- API gateway patterns (routing, rate limiting, auth, request transformation, Mule vs Kong migration tradeoffs)
+- GraphQL vs REST vs gRPC (when to use which), API documentation (OpenAPI/Swagger), backward compatibility
+- Process orchestration APIs (PAPI) — coordinating multiple internal services and external APIs within a single customer journey, request/response transformations between upstream and downstream
+- API modernization/migration patterns — handling 200+ API migrations, maintaining backward compatibility, phased rollout, downstream dependency analysis
 
-**Microservices:** Service decomposition (bounded contexts from DDD), inter-service communication (sync REST vs async messaging), saga pattern (choreography vs orchestration), CQRS, event sourcing, circuit breaker (Resilience4j — states, fallbacks, configuration), service discovery, distributed tracing (correlation IDs), API gateway, sidecar pattern, strangler fig migration pattern. Explain the WHY — monolith vs microservices tradeoffs.
+**Microservices Architecture:**
+- Service decomposition (bounded contexts from DDD), inter-service communication (sync REST vs async messaging)
+- Saga pattern (choreography vs orchestration) — orchestration-style sagas for payment/enrollment flows where multiple services must coordinate in sequence with rollback on failure
+- CQRS, event sourcing, circuit breaker (Resilience4j — states, fallbacks, configuration), service discovery
+- Distributed tracing (correlation IDs through Splunk), API gateway, sidecar pattern, strangler fig migration
+- Multi-step orchestration: CDM → Card System → Visa → Payment Provisioning — coordinating data flow, handling partial failures, cleanup paths
+- Backend state management: tracking enrollment/processing states (in-progress, success, failure, opt-out) across async distributed workflows
 
-**Data & Caching:** Redis patterns (cache-aside, write-through, write-behind), cache invalidation strategies, TTL tuning, Redis data structures (sorted sets for leaderboards, pub/sub for events), distributed caching vs local caching, connection pooling (HikariCP tuning), database sharding, read replicas, eventual consistency.
+**Reactive & Asynchronous Programming:**
+- RxJava: Observable vs Flowable, flatMap for parallel downstream calls, observeOn(Schedulers.io()) for IO-bound work, zip for combining multiple service responses, switchMap for cancellation
+- Backpressure strategies (BUFFER, DROP, LATEST), Schedulers, error handling (onErrorResume, retry with exponential backoff)
+- CompletableFuture vs RxJava vs Project Reactor — when to use each
+- Async polling: periodically checking external service status (e.g., Visa enrollment result), triggering subsequent backend processing based on polling result
+- Sequential vs conditional vs parallel downstream execution — choosing the right pattern based on data dependencies
 
-**Messaging:** Kafka (partitions, consumer groups, exactly-once semantics, ordering guarantees), RabbitMQ (exchanges, queues, dead letter queues), event-driven architecture, idempotent consumers, outbox pattern for reliable messaging.
+**Data & Caching:**
+- Redis patterns (cache-aside, write-through, write-behind), cache invalidation, TTL tuning
+- Redis data structures (sorted sets for leaderboards, pub/sub for events), distributed vs local caching
+- Connection pooling (HikariCP tuning), database sharding, read replicas, eventual consistency
 
-**Auth & Security:** OAuth2 flows (auth code, client credentials, PKCE), JWT (structure, signing, refresh token rotation), API key management, service-to-service auth (mTLS, OAuth client credentials), encrypted payload exchange, CORS, rate limiting per identity.
+**Messaging:**
+- Kafka (partitions, consumer groups, exactly-once semantics, ordering guarantees), RabbitMQ (exchanges, queues, DLQs)
+- Event-driven architecture, idempotent consumers, outbox pattern for reliable messaging
 
-**Payment/FinTech patterns:** Idempotency keys for payment APIs, exactly-once processing, distributed transaction handling, compensating transactions, PCI DSS awareness, webhook reliability (retry with exponential backoff, signature verification), reconciliation patterns.
+**Auth & Security:**
+- OAuth2 flows (auth code, client credentials, PKCE), JWT (structure, signing, refresh token rotation)
+- B2B token-based authentication for service-to-service communication — token exchange, scope validation, token caching
+- API key management, mTLS, encrypted payload exchange, CORS, rate limiting per identity
 
-**Testing Strategy:** Test pyramid (unit → integration → contract → E2E), mocking vs real dependencies (when each is appropriate), API contract testing (Pact), integration testing with Testcontainers, load testing basics (k6, JMeter), chaos engineering concepts.
+**Payment & FinTech Patterns:**
+- Idempotency keys for payment APIs, exactly-once processing, distributed transaction handling
+- Compensating transactions — rolling back partial enrollment when downstream Visa call fails
+- Payment-instrument provisioning: creating/linking payment methods through external network APIs
+- Customer enrollment/opt-out lifecycles — state machine with transitions (eligible → in-progress → enrolled/failed → opt-out)
+- External payment network integration: handling different response codes, retry policies, timeout strategies
+- Webhook reliability (retry with exponential backoff, signature verification), reconciliation patterns
 
-Be practical — explain what you'd build and why, with code snippets where relevant. Talk like a senior backend engineer.",
+**Testing Strategy:**
+- Test pyramid (unit → integration → contract → E2E), mocking vs real dependencies
+- JUnit + Mockito patterns: mocking downstream services, ArgumentCaptor for request validation, verify interaction counts
+- API contract testing (Pact), integration testing with Testcontainers
+- Testing distributed workflows: validating state transitions, simulating downstream failures, timeout testing
+
+Rules:
+- Be practical — explain what you'd build and why, with code snippets where relevant.
+- When discussing patterns, ground them in real scenarios: 'In a payment enrollment flow, you'd use orchestration saga because you need cleanup if Visa enrollment fails after you've already created the customer record in CDM'
+- For Java/Spring Boot questions, show production-level knowledge: transaction boundaries, connection pool tuning, error propagation patterns
+- Sound like a senior backend engineer who builds payment systems, not a textbook.
+- Keep answers 2-3 minutes spoken.",
 
         "python" => "You are helping someone with Python interview questions. Cover based on what's asked:
 
@@ -817,7 +1023,7 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
     }
 
     // Jargon safety — never use terms the candidate can't explain if cross-questioned
-    if matches!(mode, "ai-ml" | "cloud" | "system-design" | "backend") {
+    if matches!(mode, "ai-ml" | "cloud" | "system-design" | "backend" | "qa") {
         prompt.push_str("\n\nCRITICAL — Jargon safety rule:
 - EVERY technical term you mention, you must explain in 1 simple sentence immediately after. If you can't explain it simply, don't mention it.
 - Prefer fewer concepts explained well over many concepts name-dropped. An interviewer who hears 'PagedAttention' WILL ask 'how does that work?' — so only mention it if the answer also explains it.
@@ -828,7 +1034,7 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
 
     // Inject resume/JD for modes that benefit from candidate context.
     // DSA and OA are pure coding — no resume needed. General is too broad.
-    let needs_resume = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "lld" | "cloud");
+    let needs_resume = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "lld" | "cloud" | "qa" | "project-deep-dive");
     if needs_resume && !resume.is_empty() {
         prompt.push_str(&format!("\n\n=== YOUR BACKGROUND (resume + project details) ===\nEverything below is YOUR real experience. Use these details to give contextually relevant examples when it helps — e.g., referencing your own projects as examples in system design, or mentioning technologies you've actually used. Do NOT invent alternatives when details are provided here.\n\n{resume}"));
     }
@@ -972,7 +1178,7 @@ pub async fn analyze_screenshots(
     // 2. Live non-coding (ai-interview, behavioral, system-design, ai-ml, backend, dbms, cloud) — contextual analysis
     // 3. OA (oa, general, default) — fast paste-ready solver
     let is_live_coding = matches!(current_mode, "dsa" | "lld" | "java" | "python");
-    let is_live_non_coding = matches!(current_mode, "ai-interview" | "behavioral" | "system-design" | "ai-ml" | "backend" | "dbms" | "cloud");
+    let is_live_non_coding = matches!(current_mode, "ai-interview" | "behavioral" | "system-design" | "ai-ml" | "backend" | "dbms" | "cloud" | "qa" | "project-deep-dive");
 
     let system_prompt = if is_live_coding {
         format!("You are helping someone in a LIVE coding interview. You are given screenshots of a coding problem. \
