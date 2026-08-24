@@ -161,6 +161,58 @@ Stack: FastAPI, GPT-4o, LangChain, OpenAI API, SQLite, RAG
 - 2,255 embedded chunks indexed into SQLite with cosine-similarity retrieval
 - Multimodal question answering, metadata logging, LLM-based response generation
 - LLM-as-judge evaluation workflow, deployed on Vercel
+
+**7. Vehicle Parking Management System — Personal Full-Stack Project**
+Stack: Python, Flask, Flask-RESTful, SQLAlchemy, Redis, Celery, JWT, Vue 3, Chart.js
+
+What it is: Full-stack parking management platform with 25+ REST API endpoints, async job processing, caching layer, role-based access, analytics dashboard and automated notifications.
+
+Backend Architecture:
+- Flask + Flask-RESTful with resource-based routing — separate resource classes per entity (ParkingLot, Reservation, User, etc.)
+- SQLAlchemy ORM with 6 models: User, ParkingLot, ParkingSpot, Reservation, Vehicle, AuditLog — proper relationships, cascades, constraints
+- Reservation state machine pattern: ACTIVE → COMPLETED (normal checkout) or ACTIVE → CANCELLED (user cancel/admin cancel/expiry). State transitions enforced at service layer — no direct DB status updates
+- JWT authentication using Flask-JWT-Extended — access + refresh token flow, token revocation via Redis blocklist
+- Role-Based Access Control (RBAC): Admin, Operator, User roles with decorator-based permission checks on endpoints
+- Input validation and error handling with consistent JSON error responses and proper HTTP status codes
+
+Redis Caching Layer:
+- Cache-aside pattern for read-heavy endpoints (parking lot listings, spot availability, user profiles)
+- TTL-based expiration (5 min for listings, 2 min for availability — shorter TTL for frequently changing data)
+- Cache invalidation on writes — any reservation/spot update invalidates related cache keys
+- Graceful degradation — if Redis is down, requests fall through to database without errors
+- Cache observability — custom response headers (X-Cache: HIT/MISS) for debugging cache behaviour
+- Redis also used for JWT token blocklist (revoked tokens stored with TTL matching token expiry)
+
+Celery Async Task Queue + Beat Scheduler:
+- Celery workers for async operations that don't need immediate response
+- Async CSV export — user requests export, gets 202 Accepted, Celery worker generates file, notifies when ready
+- Celery Beat scheduled jobs:
+  * Daily reservation reminders — scans upcoming reservations, sends email notifications
+  * Monthly analytics PDF report generation — aggregates usage data, generates PDF, emails to admins
+  * Periodic expired-reservation cleanup — marks stale ACTIVE reservations as CANCELLED
+- Task retry with exponential backoff for transient failures (email sending, external webhook calls)
+
+Email & Notifications:
+- SMTP email integration with retry logic and exponential backoff for transient failures
+- Google Chat webhook integration for real-time admin alerts (new reservations, cancellations, system events)
+- Email templates for: reservation confirmation, reminder, cancellation, monthly report
+
+API Design:
+- 25+ REST endpoints following RESTful conventions
+- OpenAPI 3.0.3 specification document for all endpoints
+- Pagination, filtering, sorting on list endpoints
+- Proper use of HTTP methods (GET/POST/PUT/PATCH/DELETE) and status codes
+
+Frontend:
+- Vue 3 with Composition API (setup script pattern)
+- Admin analytics dashboard with Chart.js — occupancy trends, revenue charts, peak-hour analysis
+- Responsive design, role-based UI rendering (admin sees management controls, users see booking flow)
+
+Key Design Decisions:
+- Chose Redis over in-memory caching for cache sharing across multiple workers and persistence across restarts
+- Chose Celery over threading for async jobs — proper task retry, scheduling, monitoring via Flower
+- State machine for reservations instead of boolean flags — cleaner transitions, audit trail, prevents invalid state combinations
+- Separate resource classes per entity instead of monolithic views — better separation of concerns, easier testing
 "#;
 
 /// Domain expertise — banking, cards, payments
@@ -196,6 +248,7 @@ pub fn experience_for_mode(mode: &str) -> String {
         "ai-interview" => format!("{}\n{}\n{}\n{}", BACKEND_DEV, QA_SDET, PROJECTS, DOMAIN),
         "behavioral" => format!("{}\n{}", PROJECTS, DOMAIN),
         "system-design" | "lld" => format!("{}\n{}", BACKEND_DEV, PROJECTS),
+        "python" => format!("{}\n{}", PROJECTS, DOMAIN),
         "ai-ml" | "cloud" => PROJECTS.to_string(),
         _ => String::new(),
     }
