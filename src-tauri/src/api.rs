@@ -224,9 +224,97 @@ IMPORTANT: The transcript may contain BOTH the interviewer's voice AND the candi
 }
 
 pub fn fallback_extraction(transcript: &str) -> ExtractionResult {
+    let lower = transcript.to_lowercase();
+    // Keyword-based mode detection when Groq extraction fails or is unavailable
+    let mode = if lower.contains("tell me about yourself") || lower.contains("introduce yourself")
+        || lower.contains("walk me through your resume") || lower.contains("about your experience")
+        || lower.contains("why are you leaving") || lower.contains("why this company")
+        || lower.contains("strengths") || lower.contains("weaknesses")
+        || lower.contains("tell me about your") || lower.contains("walk me through your")
+    {
+        "ai-interview"
+    } else if lower.contains("tell me about a time") || lower.contains("give me an example")
+        || lower.contains("describe a situation") || lower.contains("how did you handle")
+        || lower.contains("conflict") || lower.contains("leadership")
+        || lower.contains("biggest challenge") || lower.contains("what would you do if")
+    {
+        "behavioral"
+    } else if lower.contains("design a system") || lower.contains("system design")
+        || lower.contains("scalab") || lower.contains("high level design")
+        || lower.contains("architect") || lower.contains("distributed")
+        || lower.contains("load balanc") || lower.contains("millions of")
+    {
+        "system-design"
+    } else if lower.contains("class diagram") || lower.contains("low level design")
+        || lower.contains("design pattern") || lower.contains("solid")
+        || lower.contains("parking lot") || lower.contains("elevator")
+        || lower.contains("object oriented") || lower.contains("lld")
+    {
+        "lld"
+    } else if lower.contains("algorithm") || lower.contains("time complexity")
+        || lower.contains("binary search") || lower.contains("dynamic programming")
+        || lower.contains("linked list") || lower.contains("tree")
+        || lower.contains("sort") || lower.contains("data structure")
+    {
+        "dsa"
+    } else if lower.contains("leetcode") || lower.contains("online assessment")
+        || lower.contains("coding round") || lower.contains("oa ")
+    {
+        "oa"
+    } else if lower.contains("rest api") || lower.contains("microservice")
+        || lower.contains("spring boot") || lower.contains("caching")
+        || lower.contains("rate limit") || lower.contains("api gateway")
+        || lower.contains("backend")
+    {
+        "backend"
+    } else if lower.contains("java") || lower.contains("jvm")
+        || lower.contains("spring") || lower.contains("multithreading")
+        || lower.contains("concurrency")
+    {
+        "java"
+    } else if lower.contains("python") || lower.contains("flask")
+        || lower.contains("django") || lower.contains("fastapi")
+        || lower.contains("decorator")
+    {
+        "python"
+    } else if lower.contains("sql") || lower.contains("database")
+        || lower.contains("normalization") || lower.contains("index")
+        || lower.contains("query") || lower.contains("join")
+    {
+        "dbms"
+    } else if lower.contains("cucumber") || lower.contains("gherkin")
+        || lower.contains("junit") || lower.contains("test automation")
+        || lower.contains("test case") || lower.contains("regression")
+        || lower.contains("qa ") || lower.contains("sdet")
+        || lower.contains("appium") || lower.contains("postman")
+        || lower.contains("test strategy") || lower.contains("test plan")
+    {
+        "qa"
+    } else if lower.contains("kubernetes") || lower.contains("docker")
+        || lower.contains("devops") || lower.contains("cicd") || lower.contains("ci/cd")
+        || lower.contains("terraform") || lower.contains("aws")
+        || lower.contains("cloud") || lower.contains("deployment")
+    {
+        "cloud"
+    } else if lower.contains("machine learning") || lower.contains("deep learning")
+        || lower.contains("llm") || lower.contains("transformer")
+        || lower.contains("neural") || lower.contains("rag")
+        || lower.contains("fine-tun") || lower.contains("genai")
+        || lower.contains("generative ai") || lower.contains("model serving")
+    {
+        "ai-ml"
+    } else if lower.contains("how are you") || lower.contains("can you hear")
+        || lower.contains("good morning") || lower.contains("let me share")
+        || lower.contains("one moment") || lower.contains("is my audio")
+    {
+        "skip"
+    } else {
+        "general"
+    };
+
     ExtractionResult {
         question: transcript.to_string(),
-        mode: "general".to_string(),
+        mode: mode.to_string(),
         context: String::new(),
     }
 }
@@ -265,11 +353,15 @@ fn build_system_prompt(mode: &str, resume: &str, job_description: &str) -> Strin
 === COMMON QUESTION TEMPLATES ===
 
 For 'Tell me about yourself' / 'Introduce yourself':
-Structure: Present → Past → Future (60-90 seconds)
-- Present: 'I'm currently at [company] working on [what you do — one sentence]'
-- Past: 'Before this, I [1-2 key highlights that show progression]'
-- Future: 'What I'm excited about now is [connect to THIS role/company]'
-Keep it tight. Don't recite your entire resume. Hit 3-4 highlights max.
+Use ONE of these pre-written intros based on the TARGET ROLE (check the JD below). Adapt slightly to fit the specific company/role, but keep the structure and tone. DO NOT recite the resume — this should sound natural and rehearsed (in a good way).
+
+**If the target role is SOFTWARE ENGINEER / BACKEND / DEV:**
+'Hey, so I'm Ali — I've been working as a Software Engineer at HSBC Technology for about 2 years now. Most of my work has been on Java and Spring Boot backend services — building and enhancing REST APIs, microservice integrations, and process-orchestration workflows for their cards and payments platform. The biggest thing I've worked on is the Visa Click-to-Pay integration for the UK market — that involved orchestrating across multiple internal banking services and Visa's external APIs, handling enrollment flows, async polling, retry mechanisms, the whole distributed systems side of things. Before HSBC I did my B.Tech in Computer Engineering from Jamia Millia Islamia — graduated with a 9.54 CGPA. I've also been doing a Data Science diploma from IIT Madras alongside work. On the side, I've built a couple of personal projects — a full-stack parking management system with Flask, Redis, Celery, and Vue, and a couple of AI projects using LangChain and OpenAI. So yeah, that's me in a nutshell — happy to go deeper into any of this.'
+
+**If the target role is QA / SDET / TEST ENGINEER:**
+'Hey, so I'm Ali — I've been at HSBC Technology for about 2 years, working as a QA Automation Engineer on their cards and payments platform. My day-to-day is mostly around API automation using Java, Cucumber, Gherkin, and JUnit — writing BDD feature files, step definitions, and building reusable automation components. The main project I've been on is Visa Click-to-Pay for the UK market, where I tested the entire customer journey end-to-end — eligibility checks, enrollment flows, Visa service integrations, async polling, failure scenarios, the works. I also worked on Corporate Cards for MENA, doing both mobile testing with Appium and backend API validation. I've done a fair bit of migration testing too — Nova, Mule-to-Kong, AL2-to-AL3. Before this, I did my B.Tech from Jamia Millia Islamia with a 9.54 CGPA, and I've also been doing a Data Science diploma from IIT Madras on the side. So that's the quick version — happy to go into any of this in more detail.'
+
+**IMPORTANT:** Pick the right intro based on the JD/role. If no JD is provided, default to the dev intro. Tweak the ending to mention the specific company if known. Keep the casual, natural tone — this should sound like someone who's said this a few times and is comfortable with it, not someone reading off a script.
 
 For 'Walk me through your resume':
 Go chronologically but spend 80% on the RECENT and RELEVANT work. Skim education in one sentence, spend most time on current role and key projects. Connect the dots — show WHY you moved between roles.
@@ -998,19 +1090,30 @@ Give clear, structured answers with code examples where relevant. Be direct — 
     let is_structured_mode = matches!(mode, "dsa" | "system-design" | "lld");
 
     if mode != "oa" {
-    let mut human_rules = String::from("\n\nIMPORTANT — Sound human, not AI:
-- Never start with 'Great question!' or 'That's an excellent question!' — just answer directly.
-- Don't say 'Certainly!', 'Absolutely!', 'Of course!' — these are AI tells.
-- Never use these AI-tell phrases: 'In summary', 'It's worth noting', 'leverage', 'crucial', 'Let's dive into', 'It's important to note', 'That being said', 'comprehensive', 'delve', 'utilize'. Use normal words instead.
-- Use contractions naturally: 'don't', 'wouldn't', 'it's', 'we'd'.");
+    let mut human_rules = String::from("\n\nCRITICAL — WRITE LIKE A HUMAN, NOT AN AI. This is the most important rule:
+
+**BANNED words/phrases (NEVER use these — they instantly flag AI-generated text):**
+'Great question', 'That's an excellent question', 'Certainly', 'Absolutely', 'Of course', 'In summary', 'It's worth noting', 'leverage', 'crucial', 'Let's dive into', 'It's important to note', 'That being said', 'comprehensive', 'delve', 'utilize', 'facilitate', 'robust', 'seamless', 'streamline', 'cutting-edge', 'game-changer', 'best practices', 'holistic', 'synergy', 'paradigm', 'ecosystem', 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'overarching', 'pivotal', 'nuanced', 'realm', 'landscape', 'foster', 'empower', 'multifaceted', 'underscore', 'bolster'.
+
+**How to actually sound human:**
+- Use contractions always: 'don't', 'wouldn't', 'it's', 'we'd', 'can't', 'hasn't', 'I've', 'that's'
+- Use simple everyday words: 'use' not 'utilize', 'help' not 'facilitate', 'strong' not 'robust', 'smooth' not 'seamless', 'important' not 'crucial/pivotal'
+- Write sentences of varying length. Some short. Others a bit longer when explaining something. Don't make every sentence the same polished length.
+- Occasionally be slightly imprecise like humans are: 'around 200 APIs' not 'approximately 200 APIs', 'a bunch of' not 'a significant number of', 'pretty much' not 'essentially'
+- Drop unnecessary filler words that AI loves: remove 'Basically,' from the start of sentences, remove 'effectively' and 'essentially' unless truly needed");
 
     if !is_structured_mode {
         // Conversational touches only for non-structured modes (ai-interview, behavioral, general, etc.)
         human_rules.push_str("
-- Start with a brief thinking phrase occasionally: 'So...', 'Right, so...', 'Okay so basically...' — but don't overdo it, only sometimes.
-- Avoid bullet-point heavy answers. Mix paragraphs with bullets naturally.
-- Occasionally show self-correction: 'Actually, wait — a better approach would be...' or 'Well, initially I thought X but Y makes more sense because...'
-- Keep a conversational tone throughout — like you're explaining to a colleague at a whiteboard.");
+
+**Conversational tone (NON-CODING modes):**
+- Start naturally like you're thinking out loud: 'So...', 'Right, so...', 'Yeah so basically...', 'Hmm, that's a good one...', 'Okay let me think about this...' — but VARY these, don't always use the same opener
+- DON'T structure everything as neat bullet points. Write in flowing paragraphs like you'd actually speak. Use bullets sparingly, only when listing concrete items (tech stack, steps, tools)
+- Show genuine thinking: 'Actually now that I think about it...' or 'I remember when we were working on this...' — real people meander a tiny bit
+- Use filler that real speakers use: 'kind of', 'sort of', 'more or less', 'I'd say', 'if I'm being honest', 'off the top of my head'
+- Don't over-explain. Humans skip things they consider obvious. If something is basic, just mention it and move on
+- Don't wrap up with a tidy conclusion. Humans just... stop talking when they're done, or trail off with something like 'so yeah, that was the main thing' or 'that's pretty much it'
+- VARY your sentence starters. Never start 3+ sentences in a row with the same word pattern (especially 'I', 'We', 'The')");
     }
 
     prompt.push_str(&human_rules);

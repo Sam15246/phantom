@@ -84,8 +84,12 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         let _ = app.emit("pipeline:status", "Analyzing question...");
         let extraction = if !cfg.groq_api_key.is_empty() {
             api::extract_question(&http.client, &cfg.groq_api_key, &transcript).await
-                .unwrap_or_else(|_| api::fallback_extraction(&transcript))
+                .unwrap_or_else(|e| {
+                    eprintln!("[phantom] Groq extraction failed, using keyword fallback: {e}");
+                    api::fallback_extraction(&transcript)
+                })
         } else {
+            eprintln!("[phantom] No Groq API key — using keyword fallback for mode detection");
             api::fallback_extraction(&transcript)
         };
         let _ = app.emit("pipeline:extraction", &extraction);

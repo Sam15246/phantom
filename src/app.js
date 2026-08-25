@@ -210,7 +210,8 @@ function showAnswer(html) {
   if (hint) {
     hint.style.display = isClickThrough ? 'block' : 'none';
   }
-  answerBox.scrollTop = answerBox.scrollHeight;
+  // Don't auto-scroll to bottom — keep window at top so user reads from the start.
+  // User can scroll down manually with Ctrl+Shift+↓ or auto-scroll hotkey.
 }
 
 // --- Chunk Rendering Debounce (UX-7) ---
