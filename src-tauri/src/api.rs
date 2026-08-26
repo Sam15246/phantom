@@ -137,7 +137,11 @@ struct ChatChoice {
 
 #[derive(Debug, Deserialize)]
 struct ChatMessageResponse {
+    #[serde(default)]
     content: String,
+    /// Reasoning models (gpt-oss-*) put output here instead of content
+    #[serde(default)]
+    reasoning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,47 +184,72 @@ NOTE: ai-interview = general self-introduction, resume walkthrough, "tell me abo
 IMPORTANT: If the question references the candidate's specific projects, past work, companies, or asks them to "walk through" or "tell about" something they built/did, use "ai-interview" mode.
 IMPORTANT: The transcript may contain BOTH the interviewer's voice AND the candidate's voice. Extract ONLY the interviewer's question. Ignore any responses, filler words, or answers from the candidate. Look for question patterns (who/what/when/where/why/how, rising intonation markers, imperative requests like 'explain', 'describe', 'tell me')."#;
 
-    let request = ChatRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
-        messages: vec![
-            ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
-            ChatMessage { role: "user".to_string(), content: format!("Transcript:\n{transcript}") },
-        ],
-        temperature: 0.1,
-        max_tokens: 500,
-    };
+    let messages = vec![
+        ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
+        ChatMessage { role: "user".to_string(), content: format!("Transcript:\n{transcript}") },
+    ];
 
-    let response = client
-        .post("https://api.groq.com/openai/v1/chat/completions")
-        .header("Authorization", format!("Bearer {groq_api_key}"))
-        .header("Content-Type", "application/json")
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("Groq request error: {e}"))?;
+    // Try primary model, fall back to smaller model on rate limit or failure
+    let models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+    let mut last_err = String::new();
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Groq API error {status}: {body}"));
-    }
+    for model in models {
+        let request = ChatRequest {
+            model: model.to_string(),
+            messages: messages.clone(),
+            temperature: 0.1,
+            // Reasoning models (gpt-oss-*) need extra tokens for internal chain-of-thought
+            max_tokens: 1024,
+        };
 
-    let result: ChatResponse = response.json().await.map_err(|e| format!("Groq parse error: {e}"))?;
-    let content = result.choices.first().map(|c| c.message.content.clone()).unwrap_or_default();
+        let response = match client
+            .post("https://api.groq.com/openai/v1/chat/completions")
+            .header("Authorization", format!("Bearer {groq_api_key}"))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await {
+                Ok(r) => r,
+                Err(e) => { last_err = format!("Groq request error ({model}): {e}"); continue; }
+            };
 
-    // Try to extract JSON from the response (it may have extra text around it)
-    let json_str = if let Some(start) = content.find('{') {
-        if let Some(end) = content.rfind('}') {
-            &content[start..=end]
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            last_err = format!("Groq API error ({model}) {status}: {body}");
+            eprintln!("[phantom] {last_err}");
+            continue; // try next model
+        }
+
+        let result: ChatResponse = match response.json().await {
+            Ok(r) => r,
+            Err(e) => { last_err = format!("Groq parse error ({model}): {e}"); continue; }
+        };
+        // Reasoning models (gpt-oss-*) may put output in `reasoning` instead of `content`
+        let content = result.choices.first().map(|c| {
+            if c.message.content.is_empty() {
+                c.message.reasoning.clone().unwrap_or_default()
+            } else {
+                c.message.content.clone()
+            }
+        }).unwrap_or_default();
+
+        // Extract JSON from the response (may have extra text around it)
+        let json_str = if let Some(start) = content.find('{') {
+            if let Some(end) = content.rfind('}') {
+                &content[start..=end]
+            } else {
+                &content
+            }
         } else {
             &content
-        }
-    } else {
-        &content
-    };
+        };
 
-    serde_json::from_str::<ExtractionResult>(json_str)
-        .map_err(|e| format!("Failed to parse extraction: {e}. Raw: {content}"))
+        return serde_json::from_str::<ExtractionResult>(json_str)
+            .map_err(|e| format!("Failed to parse extraction: {e}. Raw: {content}"));
+    }
+
+    Err(last_err)
 }
 
 pub fn fallback_extraction(transcript: &str) -> ExtractionResult {
