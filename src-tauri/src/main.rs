@@ -40,6 +40,25 @@ impl ClickThroughState {
     }
 }
 
+pub struct NightModeState {
+    pub enabled: std::sync::atomic::AtomicBool,
+}
+
+impl NightModeState {
+    pub fn new() -> Self {
+        Self {
+            enabled: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+pub struct TrayMenuState {
+    pub record_item: tauri::menu::MenuItem<tauri::Wry>,
+    pub night_mode_item: tauri::menu::MenuItem<tauri::Wry>,
+    pub click_through_item: tauri::menu::MenuItem<tauri::Wry>,
+    pub mode_submenu: tauri::menu::Submenu<tauri::Wry>,
+}
+
 async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), String> {
     use tauri::Manager;
 
@@ -328,6 +347,7 @@ fn main() {
         .manage(audio::RecordingStore::new())
         .manage(ConversationHistory::new())
         .manage(ClickThroughState::new())
+        .manage(NightModeState::new())
         .manage(screenshot::ScreenshotQueue::new())
         .manage(api::SharedHttpClient::new())
         .manage(config::ConfigCache::new())
@@ -809,28 +829,116 @@ fn main() {
 
             // System tray
             {
-                use tauri::menu::{Menu, MenuItem};
+                use tauri::Manager;
+                use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
                 use tauri::tray::TrayIconBuilder;
 
+                let record_item = MenuItem::with_id(app, "record", "Start Recording", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let screenshot_item = MenuItem::with_id(app, "screenshot", "Take Screenshot", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let analyze_item = MenuItem::with_id(app, "analyze", "Analyze Screenshots", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                let mode_submenu = SubmenuBuilder::with_id(app, "mode-submenu", "Mode: Auto-Detect")
+                    .item(&MenuItem::with_id(app, "mode-auto", "Auto-Detect", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .separator()
+                    .item(&MenuItem::with_id(app, "mode-dsa", "DSA", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-oa", "OA", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-system-design", "System Design", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-lld", "LLD", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-ai-interview", "AI-Interview", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-project-deep-dive", "Project Deep-Dive", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-ai-ml", "AI-ML", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-cloud", "Cloud", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-backend", "Backend", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-qa", "QA", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-behavioral", "Behavioral", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-java", "Java", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-python", "Python", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .item(&MenuItem::with_id(app, "mode-dbms", "DBMS", true, None::<&str>).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?)
+                    .build()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                let copy_answer_item = MenuItem::with_id(app, "copy-answer", "Copy Answer", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let copy_code_item = MenuItem::with_id(app, "copy-code", "Copy Code Blocks", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                let night_mode_item = MenuItem::with_id(app, "night-mode", "Night Mode: OFF", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let click_through_item = MenuItem::with_id(app, "click-through", "Click-Through: ON", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                let clear_session_item = MenuItem::with_id(app, "clear-session", "Clear Session", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
                 let quit_item = MenuItem::with_id(app, "quit", "Exit Audio Service", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-                let menu = Menu::with_items(app, &[&quit_item])
+
+                let menu = MenuBuilder::new(app)
+                    .item(&record_item)
+                    .item(&screenshot_item)
+                    .item(&analyze_item)
+                    .separator()
+                    .item(&mode_submenu)
+                    .separator()
+                    .item(&copy_answer_item)
+                    .item(&copy_code_item)
+                    .separator()
+                    .item(&night_mode_item)
+                    .item(&click_through_item)
+                    .separator()
+                    .item(&clear_session_item)
+                    .item(&quit_item)
+                    .build()
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                app.manage(TrayMenuState {
+                    record_item,
+                    night_mode_item,
+                    click_through_item,
+                    mode_submenu,
+                });
 
                 let _tray = TrayIconBuilder::new()
                     .tooltip("Windows Audio Device Manager")
                     .menu(&menu)
                     .on_menu_event(move |tray_app, event| {
                         use tauri::Manager;
-                        if event.id() == "quit" {
-                            hotkeys::unregister_all(tray_app);
-                            if let Some(win) = tray_app.get_webview_window("main") {
-                                let _ = win.close();
+                        let id = event.id().as_ref();
+                        match id {
+                            "record" => { let _ = tray_app.emit("hotkey:toggle-recording", ()); }
+                            "screenshot" => { let _ = tray_app.emit("hotkey:screenshot", ()); }
+                            "analyze" => { let _ = tray_app.emit("hotkey:analyze", ()); }
+                            "copy-answer" => { let _ = tray_app.emit("hotkey:copy-answer", ()); }
+                            "copy-code" => { let _ = tray_app.emit("hotkey:copy-code", ()); }
+                            "night-mode" => { let _ = tray_app.emit("hotkey:toggle-night-mode", ()); }
+                            "click-through" => { let _ = tray_app.emit("hotkey:toggle-click-through", ()); }
+                            "clear-session" => { let _ = tray_app.emit("hotkey:clear-session", ()); }
+                            "quit" => {
+                                hotkeys::unregister_all(tray_app);
+                                if let Some(win) = tray_app.get_webview_window("main") {
+                                    let _ = win.close();
+                                }
+                                std::thread::spawn(|| {
+                                    std::thread::sleep(std::time::Duration::from_millis(200));
+                                    std::process::exit(0);
+                                });
                             }
-                            std::thread::spawn(|| {
-                                std::thread::sleep(std::time::Duration::from_millis(200));
-                                std::process::exit(0);
-                            });
+                            mode_id if mode_id.starts_with("mode-") => {
+                                let mode = &mode_id["mode-".len()..];
+                                let history = tray_app.state::<ConversationHistory>();
+                                if mode == "auto" {
+                                    *history.locked_mode.lock().unwrap() = None;
+                                    *history.last_mode.lock().unwrap() = "general".to_string();
+                                    let _ = tray_app.emit("mode:locked", "auto");
+                                } else {
+                                    *history.locked_mode.lock().unwrap() = Some(mode.to_string());
+                                    *history.last_mode.lock().unwrap() = mode.to_string();
+                                    let _ = tray_app.emit("mode:locked", mode);
+                                }
+                            }
+                            _ => {}
                         }
                     })
                     .build(app)
