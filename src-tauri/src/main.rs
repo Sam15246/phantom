@@ -473,13 +473,27 @@ fn main() {
                     // Toggle WS_EX_NOACTIVATE: on when passive (click-through), off when interactive
                     overlay::update_noactivate(&ct_handle, new_val);
                     let _ = ct_handle.emit("hotkey:toggle-click-through-ui", new_val);
+                    // Update tray menu label
+                    if let Some(tray_state) = ct_handle.try_state::<TrayMenuState>() {
+                        let label = if new_val { "Click-Through: ON" } else { "Click-Through: OFF" };
+                        let _ = tray_state.click_through_item.set_text(label);
+                    }
                 });
             }
 
             // Handle toggle night mode (Ctrl+Shift+Z)
             let nm_handle = handle.clone();
             app.listen("hotkey:toggle-night-mode", move |_| {
+                use tauri::Manager;
                 let _ = nm_handle.emit("hotkey:toggle-night-mode-ui", ());
+                // Toggle backend state mirror and update tray label
+                let nm_state = nm_handle.state::<NightModeState>();
+                let was = nm_state.enabled.load(std::sync::atomic::Ordering::SeqCst);
+                nm_state.enabled.store(!was, std::sync::atomic::Ordering::SeqCst);
+                if let Some(tray_state) = nm_handle.try_state::<TrayMenuState>() {
+                    let label = if !was { "Night Mode: ON" } else { "Night Mode: OFF" };
+                    let _ = tray_state.night_mode_item.set_text(label);
+                }
             });
 
             // Handle toggle visibility (Ctrl+Shift+H)
@@ -536,6 +550,14 @@ fn main() {
                     *locked = next;
 
                     let _ = cycle_handle.emit("mode:locked", &mode_name);
+                    // Update tray submenu label
+                    if let Some(tray_state) = cycle_handle.try_state::<TrayMenuState>() {
+                        let display = match mode_name.as_str() {
+                            "auto" => "Mode: Auto-Detect".to_string(),
+                            other => format!("Mode: {}", other.to_uppercase()),
+                        };
+                        let _ = tray_state.mode_submenu.set_text(&display);
+                    }
                 });
             }
 
@@ -548,6 +570,9 @@ fn main() {
                     *history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()) = None;
                     *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "general".to_string();
                     let _ = unlock_handle.emit("mode:locked", "auto");
+                    if let Some(tray_state) = unlock_handle.try_state::<TrayMenuState>() {
+                        let _ = tray_state.mode_submenu.set_text("Mode: Auto-Detect");
+                    }
                 });
             }
 
@@ -564,6 +589,10 @@ fn main() {
                         let byte_count = wav_bytes.len();
                         *store.data.lock().unwrap_or_else(|e| e.into_inner()) = Some(wav_bytes.clone());
                         let _ = rec_handle.emit("recording:stopped", byte_count);
+                        // Update tray menu label
+                        if let Some(tray_state) = rec_handle.try_state::<TrayMenuState>() {
+                            let _ = tray_state.record_item.set_text("Start Recording");
+                        }
 
                         // Spawn the AI pipeline (with concurrency guard)
                         let pipeline_handle = rec_handle.clone();
@@ -592,12 +621,20 @@ fn main() {
                         match engine.start_recording(&audio_source) {
                             Ok(warning) => {
                                 let _ = rec_handle.emit("recording:started", ());
+                                // Update tray menu label
+                                if let Some(tray_state) = rec_handle.try_state::<TrayMenuState>() {
+                                    let _ = tray_state.record_item.set_text("Stop Recording");
+                                }
                                 if let Some(msg) = warning {
                                     let _ = rec_handle.emit("recording:warning", &msg);
                                 }
                             }
                             Err(e) => {
                                 let _ = rec_handle.emit("recording:error", e);
+                                // Ensure tray label stays correct on failure
+                                if let Some(tray_state) = rec_handle.try_state::<TrayMenuState>() {
+                                    let _ = tray_state.record_item.set_text("Start Recording");
+                                }
                             }
                         }
                     }
@@ -929,13 +966,19 @@ fn main() {
                                 let mode = &mode_id["mode-".len()..];
                                 let history = tray_app.state::<ConversationHistory>();
                                 if mode == "auto" {
-                                    *history.locked_mode.lock().unwrap() = None;
-                                    *history.last_mode.lock().unwrap() = "general".to_string();
+                                    *history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                                    *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "general".to_string();
                                     let _ = tray_app.emit("mode:locked", "auto");
+                                    if let Some(tray_state) = tray_app.try_state::<TrayMenuState>() {
+                                        let _ = tray_state.mode_submenu.set_text("Mode: Auto-Detect");
+                                    }
                                 } else {
-                                    *history.locked_mode.lock().unwrap() = Some(mode.to_string());
-                                    *history.last_mode.lock().unwrap() = mode.to_string();
+                                    *history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()) = Some(mode.to_string());
+                                    *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode.to_string();
                                     let _ = tray_app.emit("mode:locked", mode);
+                                    if let Some(tray_state) = tray_app.try_state::<TrayMenuState>() {
+                                        let _ = tray_state.mode_submenu.set_text(&format!("Mode: {}", mode.to_uppercase()));
+                                    }
                                 }
                             }
                             _ => {}
