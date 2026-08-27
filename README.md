@@ -33,6 +33,8 @@ The tool auto-detects question type and routes to the right prompt + model:
 | Python | FastAPI, Django, async, decorators | Terra |
 | DBMS | SQL, indexing, transactions, normalization | Terra |
 | Cloud | AWS, K8s, Docker, CI/CD | Terra |
+| QA | API testing, automation, frameworks | Terra |
+| Project Deep-Dive | Technical project walkthrough | Sol |
 | Behavioral | STAR method, culture fit, situational | Luna |
 | General | OS, networking, security, misc CS | Luna |
 
@@ -56,7 +58,10 @@ All hotkeys use **Ctrl+Shift** prefix (conflict-free with Chrome/Edge):
 | Z | Night Mode |
 | X | Copy Answer |
 | . | Copy Code Blocks Only |
-| 4 | Cycle Mode Lock (DSA > OA > SD > LLD > AI-Interview > AI-ML > Auto) |
+| 6 | Toggle Compact/Bullet Mode |
+| 7 | Cycle Font Size (S/M/L) |
+| 8 | Toggle Auto-Scroll (Teleprompter) |
+| 4 | Cycle Mode Lock (DSA > OA > SD > LLD > AI-Int > Proj > AI-ML > Cloud > Backend > QA > Behavioral) |
 | 5 | Unlock Mode (Auto-detect) |
 | 1 / 2 / 3 | Model: Sol / Terra / Luna |
 | 9 / 0 | Opacity Up / Down |
@@ -69,6 +74,19 @@ All hotkeys use **Ctrl+Shift** prefix (conflict-free with Chrome/Edge):
 | Backspace | Clear Session |
 | Q | Emergency Exit |
 | F1 | Help Overlay |
+
+## Tray Menu (Fallback Controls)
+
+When proctoring software blocks keyboard hotkeys, all essential actions are available via right-click on the system tray icon:
+
+- Start/Stop Recording
+- Take Screenshot / Analyze Screenshots
+- Mode selection (submenu with all 15 modes)
+- Copy Answer / Copy Code Blocks
+- Night Mode / Click-Through toggle
+- Clear Session / Exit
+
+Menu labels update dynamically to reflect current state (e.g., "Stop Recording" while recording, "Mode: DSA" when locked).
 
 ## Setup
 
@@ -91,7 +109,7 @@ npm install
 npm run tauri build
 ```
 
-The release binary is at `src-tauri/target/release/audiodvc.exe` (~11 MB).
+The release binary is at `src-tauri/target/release/audiodvc.exe` (~13 MB).
 
 ### Dev Mode
 
@@ -128,9 +146,12 @@ phantom/
 - Window title: "Audio Device Properties"
 - PE metadata: Microsoft Corporation publisher
 - Content protection: `WDA_EXCLUDEFROMCAPTURE` (invisible to screen sharing)
+- Hidden from Alt+Tab / Win+Tab (`WS_EX_TOOLWINDOW`)
+- Process priority: below-normal + Windows efficiency mode (green leaf in Task Manager)
 - No browser extension, no network fingerprint
 - Settings and sessions encrypted at rest (AES-256-GCM)
 - Tray icon only, skip taskbar
+- Tray context menu as fallback when hotkeys are blocked
 
 ## Settings
 
