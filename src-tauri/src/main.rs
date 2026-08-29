@@ -5,6 +5,7 @@ mod audio;
 mod config;
 mod hotkeys;
 mod overlay;
+mod proctor_detect;
 mod screenshot;
 mod experience;
 
@@ -88,6 +89,19 @@ impl NightModeState {
     }
 }
 
+/// Stores the latest proctoring scan result for adaptive behavior.
+pub struct ProctorState {
+    pub report: std::sync::Mutex<Option<proctor_detect::ProctorReport>>,
+}
+
+impl ProctorState {
+    pub fn new() -> Self {
+        Self {
+            report: std::sync::Mutex::new(None),
+        }
+    }
+}
+
 pub struct TrayMenuState {
     pub record_item: tauri::menu::MenuItem<tauri::Wry>,
     pub night_mode_item: tauri::menu::MenuItem<tauri::Wry>,
@@ -111,7 +125,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
 
     // Step 1: Transcribe
     let _ = app.emit("pipeline:status", "Transcribing...");
-    let transcript = api::transcribe_audio(&http.client, &cfg.openai_api_key, wav_bytes).await?;
+    let transcript = api::transcribe_audio(&http.client, &cfg.openai_api_key, wav_bytes, cfg.openai_url()).await?;
     let _ = app.emit("pipeline:transcript", &transcript);
 
     if transcript.trim().is_empty() {
@@ -138,7 +152,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         // Auto-detect mode via Groq extraction
         let _ = app.emit("pipeline:status", "Analyzing question...");
         let extraction = if !cfg.groq_api_key.is_empty() {
-            api::extract_question(&http.client, &cfg.groq_api_key, &transcript).await
+            api::extract_question(&http.client, &cfg.groq_api_key, &transcript, cfg.groq_url()).await
                 .unwrap_or_else(|e| {
                     eprintln!("[phantom] Groq extraction failed, using keyword fallback: {e}");
                     api::fallback_extraction(&transcript)
@@ -186,6 +200,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         &hist,
         &cfg.resume_text,
         &cfg.job_description,
+        cfg.openai_url(),
     ).await?;
 
     // Store in conversation history
@@ -249,6 +264,7 @@ async fn ask_followup(
         &hist,
         &cfg.resume_text,
         &cfg.job_description,
+        cfg.openai_url(),
     ).await;
 
     // Only add to history if generation succeeded
@@ -280,7 +296,7 @@ async fn speak_answer(app: tauri::AppHandle, text: String) -> Result<String, Str
         return Err("OpenAI API key not set".into());
     }
     let http = app.state::<api::SharedHttpClient>();
-    api::text_to_speech(&http.client, &cfg.openai_api_key, &text).await
+    api::text_to_speech(&http.client, &cfg.openai_api_key, &text, cfg.openai_url()).await
 }
 
 #[tauri::command]
@@ -370,6 +386,7 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
         &[],
         &cfg.resume_text,
         &cfg.job_description,
+        cfg.openai_url(),
     ).await?;
 
     Ok(())
@@ -385,6 +402,7 @@ fn main() {
         .manage(ClickThroughState::new())
         .manage(NightModeState::new())
         .manage(screenshot::ScreenshotQueue::new())
+        .manage(ProctorState::new())
         .manage(api::SharedHttpClient::new())
         .manage(config::ConfigCache::new())
         .invoke_handler(tauri::generate_handler![
@@ -405,6 +423,8 @@ fn main() {
             screenshot::take_screenshot,
             screenshot::get_screenshot_count,
             screenshot::clear_screenshots,
+            proctor_detect::proctor_scan,
+            proctor_detect::proctor_quick_scan,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -430,17 +450,116 @@ fn main() {
                 let _ = handle.emit("pipeline:error", format!("Hotkey registration failed: {e}"));
             }
 
+            // Run proctoring detection scan on startup (background thread)
+            {
+                let scan_handle = handle.clone();
+                std::thread::spawn(move || {
+                    use tauri::Manager;
+                    let report = proctor_detect::full_scan();
+                    let _ = scan_handle.emit("proctor:scan-result", &report);
+
+                    // Store in managed state for other systems to query
+                    if let Some(state) = scan_handle.try_state::<ProctorState>() {
+                        *state.report.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(report.clone());
+                    }
+
+                    // --- Adaptive behavior based on detection ---
+
+                    // If WDA detection is active, disable capture protection
+                    // (being detected is worse than being visible to capture)
+                    if report.active_capabilities.any_wda_detection {
+                        #[cfg(target_os = "windows")]
+                        {
+                            if let Some(window) = scan_handle.get_webview_window("main") {
+                                if let Ok(hwnd) = window.hwnd() {
+                                    unsafe {
+                                        // Reset to WDA_NONE (0) — removes the detectable flag
+                                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(
+                                            hwnd.0, 0
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        let _ = scan_handle.emit("proctor:adaptation",
+                            "WDA scanner detected — capture protection disabled to avoid detection");
+                    }
+
+                    // If keyboard hooks detected, notify frontend to suggest tray usage
+                    if report.active_capabilities.any_keyboard_hook {
+                        let _ = scan_handle.emit("proctor:adaptation",
+                            "Keyboard hooks detected — use tray menu if hotkeys stop working");
+                    }
+
+                    // If network monitoring detected, warn about API visibility
+                    if report.active_capabilities.any_network_monitor {
+                        let _ = scan_handle.emit("proctor:adaptation",
+                            "Network monitoring detected — API calls may be logged");
+                    }
+
+                    // Log to console in debug mode
+                    #[cfg(debug_assertions)]
+                    {
+                        if report.vendors.is_empty() {
+                            println!("[proctor] No proctoring software detected");
+                        } else {
+                            println!("[proctor] DETECTED {} vendor(s): {:?}",
+                                report.vendors.len(),
+                                report.vendors.iter().map(|v| v.name).collect::<Vec<_>>()
+                            );
+                            println!("[proctor] Threat level: {:?}", report.threat_level);
+                            for rec in &report.recommendations {
+                                println!("[proctor] >> {}", rec);
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Periodic proctoring re-scan (every 60s, quick scan — process only)
+            {
+                let periodic_handle = handle.clone();
+                std::thread::spawn(move || {
+                    use tauri::Manager;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                        let report = proctor_detect::quick_scan();
+
+                        // Only emit if something changed (vendors detected or cleared)
+                        let prev_empty = periodic_handle
+                            .try_state::<ProctorState>()
+                            .map(|s| {
+                                s.report.lock().unwrap_or_else(|e| e.into_inner())
+                                    .as_ref()
+                                    .map(|r| r.vendors.is_empty())
+                                    .unwrap_or(true)
+                            })
+                            .unwrap_or(true);
+                        let now_empty = report.vendors.is_empty();
+
+                        if prev_empty != now_empty || !now_empty {
+                            let _ = periodic_handle.emit("proctor:scan-result", &report);
+                            if let Some(state) = periodic_handle.try_state::<ProctorState>() {
+                                *state.report.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    Some(report);
+                            }
+                        }
+                    }
+                });
+            }
+
             // Pre-warm HTTP connections (TLS handshake in background)
             {
                 use tauri::Manager;
                 let client = handle.state::<api::SharedHttpClient>().client.clone();
+                let cfg = handle.state::<config::ConfigCache>().get().unwrap_or_default();
+                let openai_url = cfg.openai_url().to_string();
+                let groq_url = cfg.groq_url().to_string();
                 tauri::async_runtime::spawn(async move {
-                    let targets = [
-                        "https://api.openai.com",
-                        "https://api.groq.com",
-                    ];
+                    let targets = [openai_url, groq_url];
                     for url in targets {
-                        let _ = client.head(url).send().await;
+                        let _ = client.head(&url).send().await;
                     }
                 });
             }
@@ -716,6 +835,7 @@ fn main() {
                                     &http.client,
                                     &cfg.openai_api_key,
                                     &summary_prompt,
+                                    cfg.openai_url(),
                                 ).await {
                                     // Save encrypted summary
                                     let base = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -859,6 +979,7 @@ fn main() {
                             &screenshots_b64,
                             &current_mode,
                             &history_snapshot,
+                            cfg.openai_url(),
                         )
                         .await
                         {
@@ -936,6 +1057,8 @@ fn main() {
                 let click_through_item = MenuItem::with_id(app, "click-through", "Click-Through: ON", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
+                let rescan_item = MenuItem::with_id(app, "proctor-rescan", "Rescan Environment", true, None::<&str>)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
                 let clear_session_item = MenuItem::with_id(app, "clear-session", "Clear Session", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
                 let quit_item = MenuItem::with_id(app, "quit", "Exit Audio Service", true, None::<&str>)
@@ -954,6 +1077,7 @@ fn main() {
                     .item(&night_mode_item)
                     .item(&click_through_item)
                     .separator()
+                    .item(&rescan_item)
                     .item(&clear_session_item)
                     .item(&quit_item)
                     .build()
@@ -980,6 +1104,17 @@ fn main() {
                             "copy-code" => { let _ = tray_app.emit("hotkey:copy-code", ()); }
                             "night-mode" => { let _ = tray_app.emit("hotkey:toggle-night-mode", ()); }
                             "click-through" => { let _ = tray_app.emit("hotkey:toggle-click-through", ()); }
+                            "proctor-rescan" => {
+                                let rescan_handle = tray_app.clone();
+                                std::thread::spawn(move || {
+                                    let report = proctor_detect::full_scan();
+                                    let _ = rescan_handle.emit("proctor:scan-result", &report);
+                                    if let Some(state) = rescan_handle.try_state::<ProctorState>() {
+                                        *state.report.lock().unwrap_or_else(|e| e.into_inner()) =
+                                            Some(report);
+                                    }
+                                });
+                            }
                             "clear-session" => { let _ = tray_app.emit("hotkey:clear-session", ()); }
                             "quit" => {
                                 hotkeys::unregister_all(tray_app);

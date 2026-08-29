@@ -41,7 +41,7 @@ struct TranscriptionResponse {
     text: String,
 }
 
-pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes: Vec<u8>) -> Result<String, String> {
+pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes: Vec<u8>, base_url: &str) -> Result<String, String> {
 
     let part = multipart::Part::bytes(wav_bytes)
         .file_name("recording.wav")
@@ -92,7 +92,7 @@ pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes
         .part("file", part);
 
     let response = client
-        .post("https://api.openai.com/v1/audio/transcriptions")
+        .post(format!("{base_url}/v1/audio/transcriptions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .multipart(form)
         .send()
@@ -151,7 +151,7 @@ pub struct ExtractionResult {
     pub context: String,
 }
 
-pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, transcript: &str) -> Result<ExtractionResult, String> {
+pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, transcript: &str, base_url: &str) -> Result<ExtractionResult, String> {
 
     let system_prompt = r#"You are an interview question extractor. Given a transcript, extract:
 1. The core interview question (cleaned up)
@@ -203,7 +203,7 @@ IMPORTANT: The transcript may contain BOTH the interviewer's voice AND the candi
         };
 
         let response = match client
-            .post("https://api.groq.com/openai/v1/chat/completions")
+            .post(format!("{base_url}/openai/v1/chat/completions"))
             .header("Authorization", format!("Bearer {groq_api_key}"))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -1219,6 +1219,7 @@ pub async fn generate_answer_streaming(
     history: &[ChatMessage],
     resume: &str,
     job_description: &str,
+    base_url: &str,
 ) -> Result<String, String> {
     let model = select_model(mode);
     let system_prompt = build_system_prompt(mode, resume, job_description);
@@ -1253,7 +1254,7 @@ pub async fn generate_answer_streaming(
     let _ = app.emit("answer:mode", mode);
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&request_body)
@@ -1314,6 +1315,7 @@ pub async fn analyze_screenshots(
     screenshots_b64: &[String],
     current_mode: &str,
     history: &[ChatMessage],
+    base_url: &str,
 ) -> Result<String, String> {
 
     // Three screenshot prompt categories:
@@ -1460,7 +1462,7 @@ pub async fn analyze_screenshots(
     let _ = app.emit("answer:mode", current_mode);
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
@@ -1518,6 +1520,7 @@ pub async fn generate_answer_silent(
     client: &reqwest::Client,
     api_key: &str,
     prompt: &str,
+    base_url: &str,
 ) -> Result<String, String> {
 
     let body = serde_json::json!({
@@ -1530,7 +1533,7 @@ pub async fn generate_answer_silent(
     });
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
@@ -1549,7 +1552,7 @@ pub async fn generate_answer_silent(
 }
 
 /// Text-to-speech via OpenAI TTS API — returns audio bytes as base64
-pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str) -> Result<String, String> {
+pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str, base_url: &str) -> Result<String, String> {
 
     // Summarize long answers for TTS (keep under ~200 words for natural speech)
     let tts_text = if text.split_whitespace().count() > 200 {
@@ -1567,7 +1570,7 @@ pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str)
     });
 
     let response = client
-        .post("https://api.openai.com/v1/audio/speech")
+        .post(format!("{base_url}/v1/audio/speech"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)

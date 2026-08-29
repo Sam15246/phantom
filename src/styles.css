@@ -66,6 +66,23 @@ html, body {
   color: var(--text-accent);
 }
 
+#proctor-indicator {
+  font-size: 10px;
+  cursor: default !important;
+  transition: color 0.3s ease;
+}
+
+#proctor-indicator.threat-clear { color: #6a8a5a; }
+#proctor-indicator.threat-low { color: #b8a94a; }
+#proctor-indicator.threat-medium { color: #c49a3a; }
+#proctor-indicator.threat-high { color: #c25550; }
+#proctor-indicator.threat-critical { color: #ff3333; animation: proctor-blink 1s ease-in-out infinite; }
+
+@keyframes proctor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 #recording-timer {
   color: #c25550;
   font-weight: 600;
