@@ -28,6 +28,42 @@ impl ConversationHistory {
     }
 }
 
+/// RAII guard for the pipeline_running flag. Resets the flag to false on Drop,
+/// ensuring the lock is always released regardless of how the scope exits
+/// (normal return, early return, `?` propagation, or panic).
+struct PipelineGuard {
+    app: tauri::AppHandle,
+}
+
+impl PipelineGuard {
+    /// Try to acquire the pipeline lock. Returns `Some(guard)` on success,
+    /// `None` if another pipeline is already running.
+    fn try_acquire(app: &tauri::AppHandle) -> Option<Self> {
+        use tauri::Manager;
+        let history = app.state::<ConversationHistory>();
+        history
+            .pipeline_running
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .ok()
+            .map(|_| PipelineGuard { app: app.clone() })
+    }
+}
+
+impl Drop for PipelineGuard {
+    fn drop(&mut self) {
+        use tauri::Manager;
+        let history = self.app.state::<ConversationHistory>();
+        history
+            .pipeline_running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub struct ClickThroughState {
     pub enabled: std::sync::atomic::AtomicBool,
 }
@@ -598,18 +634,16 @@ fn main() {
                         let pipeline_handle = rec_handle.clone();
                         let wav = wav_bytes;
                         tauri::async_runtime::spawn(async move {
-                            use tauri::Manager;
-                            let history = pipeline_handle.state::<ConversationHistory>();
-                            if history.pipeline_running.compare_exchange(
-                                false, true,
-                                std::sync::atomic::Ordering::SeqCst,
-                                std::sync::atomic::Ordering::SeqCst,
-                            ).is_err() {
-                                let _ = pipeline_handle.emit("pipeline:error", "Another pipeline is still running");
-                                return;
-                            }
+                            // _guard must be bound to a named variable (not `_`) so it lives
+                            // for the entire async block and is dropped on any exit path.
+                            let _guard = match PipelineGuard::try_acquire(&pipeline_handle) {
+                                Some(g) => g,
+                                None => {
+                                    let _ = pipeline_handle.emit("pipeline:error", "Another pipeline is still running");
+                                    return;
+                                }
+                            };
                             let result = run_pipeline(pipeline_handle.clone(), wav).await;
-                            history.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                             if let Err(e) = result {
                                 let _ = pipeline_handle.emit("pipeline:error", &e);
                             }
@@ -771,16 +805,15 @@ fn main() {
                     }
 
                     tauri::async_runtime::spawn(async move {
-                        // Concurrency guard — prevent voice and screenshot pipelines from overlapping
-                        let history_guard = ah.state::<ConversationHistory>();
-                        if history_guard.pipeline_running.compare_exchange(
-                            false, true,
-                            std::sync::atomic::Ordering::SeqCst,
-                            std::sync::atomic::Ordering::SeqCst,
-                        ).is_err() {
-                            let _ = ah.emit("pipeline:error", "Another pipeline is still running");
-                            return;
-                        }
+                        // _guard must be bound to a named variable (not `_`) so it lives
+                        // for the entire async block and is dropped on any exit path.
+                        let _guard = match PipelineGuard::try_acquire(&ah) {
+                            Some(g) => g,
+                            None => {
+                                let _ = ah.emit("pipeline:error", "Another pipeline is still running");
+                                return;
+                            }
+                        };
 
                         let _ = ah.emit("pipeline:started", ());
                         let _ = ah.emit("pipeline:status", "Analyzing screenshots...");
@@ -789,14 +822,12 @@ fn main() {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = ah.emit("pipeline:error", &format!("Config error: {e}"));
-                                history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                                 return;
                             }
                         };
 
                         if cfg.openai_api_key.is_empty() {
                             let _ = ah.emit("pipeline:error", "OpenAI API key not set. Press Ctrl+Shift+, to open settings.");
-                            history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
                             return;
                         }
 
@@ -804,19 +835,19 @@ fn main() {
                         let screenshots_b64 = screenshot::get_screenshots_base64(queue.inner());
 
                         // Determine mode: locked_mode takes priority, then last_mode
-                        let history = ah.state::<ConversationHistory>();
+                        let history_guard = ah.state::<ConversationHistory>();
                         let current_mode = {
-                            let locked = history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            let locked = history_guard.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
                             if let Some(locked_mode) = locked {
                                 locked_mode
                             } else {
-                                history.last_mode.lock().unwrap_or_else(|e| e.into_inner()).clone()
+                                history_guard.last_mode.lock().unwrap_or_else(|e| e.into_inner()).clone()
                             }
                         };
 
                         // Snapshot conversation history for the model to see previous solutions
                         let history_snapshot = {
-                            let msgs = history.messages.lock().unwrap_or_else(|e| e.into_inner());
+                            let msgs = history_guard.messages.lock().unwrap_or_else(|e| e.into_inner());
                             msgs.clone()
                         };
 
@@ -832,16 +863,15 @@ fn main() {
                         .await
                         {
                             Ok(answer) => {
-                                let history = ah.state::<ConversationHistory>();
                                 // Only set last_mode to OA if not locked and not in a live interview context
-                                let is_locked = history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+                                let is_locked = history_guard.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).is_some();
                                 if !is_locked {
                                     let is_live = matches!(current_mode.as_str(), "dsa" | "ai-interview" | "system-design" | "lld" | "behavioral" | "ai-ml" | "backend" | "java" | "python" | "dbms" | "cloud" | "qa" | "project-deep-dive");
                                     if !is_live {
-                                        *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "OA".to_string();
+                                        *history_guard.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "OA".to_string();
                                     }
                                 }
-                                let mut msgs = history.messages.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut msgs = history_guard.messages.lock().unwrap_or_else(|e| e.into_inner());
                                 msgs.push(api::ChatMessage {
                                     role: "user".to_string(),
                                     content: format!(
@@ -858,8 +888,7 @@ fn main() {
                                 let _ = ah.emit("pipeline:error", &format!("Analysis error: {e}"));
                             }
                         }
-                        // Release concurrency guard
-                        history_guard.pipeline_running.store(false, std::sync::atomic::Ordering::SeqCst);
+                        // _guard is dropped here, automatically releasing the pipeline lock
                     });
                 });
             }

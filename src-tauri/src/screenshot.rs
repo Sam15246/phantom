@@ -90,8 +90,13 @@ pub fn capture_screen(app: &AppHandle) -> Result<Vec<u8>, String> {
             bmi.bmiHeader.biBitCount = 32;
             bmi.bmiHeader.biCompression = BI_RGB;
 
-            let pixel_count = (width * height) as usize;
-            let mut pixels: Vec<u8> = vec![0u8; pixel_count * 4];
+            let pixel_count = (width as usize)
+                .checked_mul(height as usize)
+                .ok_or("Screen dimensions overflow")?;
+            let buf_size = pixel_count
+                .checked_mul(4)
+                .ok_or("Pixel buffer size overflow")?;
+            let mut pixels: Vec<u8> = vec![0u8; buf_size];
 
             let lines = GetDIBits(
                 hdc_mem,
@@ -152,7 +157,8 @@ pub fn take_screenshot(
     queue: tauri::State<'_, ScreenshotQueue>,
 ) -> Result<usize, String> {
     let png_bytes = capture_screen(&app)?;
-    let mut q = queue.queue.lock().map_err(|e| format!("Lock error: {e}"))?;
+    // Poison-tolerant: queue is a self-contained Vec<Vec<u8>>, safe to recover
+    let mut q = queue.queue.lock().unwrap_or_else(|e| e.into_inner());
     // Cap at 5 screenshots — drop oldest when full
     if q.len() >= 5 {
         q.remove(0);
@@ -168,7 +174,8 @@ pub fn get_screenshot_count(queue: tauri::State<'_, ScreenshotQueue>) -> usize {
 
 #[tauri::command]
 pub fn clear_screenshots(queue: tauri::State<'_, ScreenshotQueue>) -> Result<(), String> {
-    let mut q = queue.queue.lock().map_err(|e| format!("Lock error: {e}"))?;
+    // Poison-tolerant: queue is a self-contained Vec<Vec<u8>>, safe to recover
+    let mut q = queue.queue.lock().unwrap_or_else(|e| e.into_inner());
     q.clear();
     Ok(())
 }

@@ -1584,3 +1584,81 @@ pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str)
     let bytes = response.bytes().await.map_err(|e| format!("TTS read error: {e}"))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- fallback_extraction --
+
+    #[test]
+    fn fallback_preserves_transcript() {
+        let result = fallback_extraction("What is a binary search tree?");
+        assert_eq!(result.question, "What is a binary search tree?");
+        assert!(result.context.is_empty());
+    }
+
+    #[test]
+    fn fallback_detects_dsa() {
+        assert_eq!(fallback_extraction("explain the algorithm for binary search").mode, "dsa");
+        assert_eq!(fallback_extraction("What is the time complexity?").mode, "dsa");
+    }
+
+    #[test]
+    fn fallback_detects_behavioral() {
+        assert_eq!(fallback_extraction("Tell me about a time you led a team").mode, "behavioral");
+        assert_eq!(fallback_extraction("Describe a situation where you had conflict").mode, "behavioral");
+    }
+
+    #[test]
+    fn fallback_detects_system_design() {
+        assert_eq!(fallback_extraction("Design a system for URL shortener").mode, "system-design");
+        assert_eq!(fallback_extraction("How would you handle scalability?").mode, "system-design");
+    }
+
+    #[test]
+    fn fallback_detects_ai_interview() {
+        assert_eq!(fallback_extraction("Tell me about yourself and your experience").mode, "ai-interview");
+        assert_eq!(fallback_extraction("Walk me through your resume").mode, "ai-interview");
+    }
+
+    #[test]
+    fn fallback_defaults_to_general() {
+        assert_eq!(fallback_extraction("What is the weather today?").mode, "general");
+    }
+
+    #[test]
+    fn fallback_detects_skip() {
+        assert_eq!(fallback_extraction("How are you doing today?").mode, "skip");
+        assert_eq!(fallback_extraction("Can you hear me okay?").mode, "skip");
+    }
+
+    // -- select_model --
+
+    #[test]
+    fn select_model_sol_modes() {
+        assert_eq!(select_model("dsa"), "gpt-5.6-sol");
+        assert_eq!(select_model("oa"), "gpt-5.6-sol");
+        assert_eq!(select_model("ai-interview"), "gpt-5.6-sol");
+        assert_eq!(select_model("ai-ml"), "gpt-5.6-sol");
+        assert_eq!(select_model("project-deep-dive"), "gpt-5.6-sol");
+    }
+
+    #[test]
+    fn select_model_terra_modes() {
+        for mode in &["system-design", "lld", "dbms", "cloud", "java", "backend", "python", "qa"] {
+            assert_eq!(select_model(mode), "gpt-5.6-terra", "mode '{mode}' should map to terra");
+        }
+    }
+
+    #[test]
+    fn select_model_luna_default() {
+        assert_eq!(select_model("behavioral"), "gpt-5.6-luna");
+        assert_eq!(select_model("unknown-mode"), "gpt-5.6-luna");
+        assert_eq!(select_model("general"), "gpt-5.6-luna");
+    }
+}
