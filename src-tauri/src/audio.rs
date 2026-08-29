@@ -62,14 +62,16 @@ impl AudioEngine {
 
         let mut mic_rate: Option<u32> = None;
         let mut sys_rate: Option<u32> = None;
+        let mut mic_fail_reason: Option<String> = None;
+        let mut sys_fail_reason: Option<String> = None;
 
         // ---- Microphone -------------------------------------------------------
         let mic_stream: Option<Box<dyn StreamHandle>> = if !capture_mic { None } else {
             match host.default_input_device() {
-                None => None,
+                None => { mic_fail_reason = Some("no default input device".into()); None }
                 Some(device) => {
                     match device.default_input_config() {
-                        Err(_) => None,
+                        Err(e) => { mic_fail_reason = Some(format!("config error: {e}")); None }
                         Ok(cfg) => {
                             let rate = cfg.sample_rate().0;
                             let ch = cfg.channels();
@@ -92,7 +94,7 @@ impl AudioEngine {
                                 },
                             );
                             match stream {
-                                Err(_) => None,
+                                Err(e) => { mic_fail_reason = Some(format!("stream build error: {e}")); mic_rate = None; None }
                                 Ok(s) => Some(s),
                             }
                         }
@@ -104,10 +106,10 @@ impl AudioEngine {
         // ---- System loopback --------------------------------------------------
         let loopback_stream: Option<Box<dyn StreamHandle>> = if !capture_system { None } else {
             match host.default_output_device() {
-                None => None,
+                None => { sys_fail_reason = Some("no default output device".into()); None }
                 Some(device) => {
                     match device.default_output_config() {
-                        Err(_) => None,
+                        Err(e) => { sys_fail_reason = Some(format!("config error: {e}")); None }
                         Ok(cfg) => {
                             let rate = cfg.sample_rate().0;
                             let ch = cfg.channels();
@@ -130,7 +132,7 @@ impl AudioEngine {
                                 },
                             );
                             match stream {
-                                Err(_) => None,
+                                Err(e) => { sys_fail_reason = Some(format!("stream build error: {e}")); sys_rate = None; None }
                                 Ok(s) => Some(s),
                             }
                         }
@@ -157,16 +159,29 @@ impl AudioEngine {
         }
 
         if streams.is_empty() {
-            return Err("No audio streams could be started".into());
+            let mut err = "No audio streams could be started".to_string();
+            if let Some(ref r) = mic_fail_reason {
+                err.push_str(&format!(" (mic: {r})"));
+            }
+            if let Some(ref r) = sys_fail_reason {
+                err.push_str(&format!(" (system: {r})"));
+            }
+            return Err(err);
         }
 
         self.is_recording.store(true, Ordering::SeqCst);
 
-        // Warn if a requested source failed
+        // Warn if a requested source failed, including the reason
         let warning = if capture_mic && capture_system {
             match (mic_ok, loopback_ok) {
-                (false, true) => Some("Mic unavailable — recording system audio only".into()),
-                (true, false) => Some("System audio unavailable — recording mic only".into()),
+                (false, true) => {
+                    let reason = mic_fail_reason.as_deref().unwrap_or("unknown");
+                    Some(format!("Mic unavailable ({reason}) — recording system audio only"))
+                }
+                (true, false) => {
+                    let reason = sys_fail_reason.as_deref().unwrap_or("unknown");
+                    Some(format!("System audio unavailable ({reason}) — recording mic only"))
+                }
                 _ => None,
             }
         } else {
@@ -226,7 +241,8 @@ impl RecordingStore {
 
 #[tauri::command]
 pub fn get_recording_data(store: State<'_, RecordingStore>) -> Result<String, String> {
-    let guard = store.data.lock().map_err(|e| e.to_string())?;
+    // Poison-tolerant: data is a self-contained Option<Vec<u8>>, safe to recover
+    let guard = store.data.lock().unwrap_or_else(|e| e.into_inner());
     match guard.as_ref() {
         None => Err("No recording available".into()),
         Some(bytes) => Ok(base64::engine::general_purpose::STANDARD.encode(bytes)),
@@ -374,4 +390,102 @@ pub fn encode_wav(samples: &[f32], sample_rate: u32, channels: u16) -> Result<Ve
     }
 
     Ok(buf.into_inner())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- mix_audio --
+
+    #[test]
+    fn mix_audio_empty_passthrough() {
+        assert_eq!(mix_audio(&[], &[1.0, 2.0]), vec![1.0, 2.0]);
+        assert_eq!(mix_audio(&[1.0, 2.0], &[]), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn mix_audio_averages() {
+        let out = mix_audio(&[1.0, 0.0], &[0.0, 1.0]);
+        assert_eq!(out, vec![0.5, 0.5]);
+    }
+
+    #[test]
+    fn mix_audio_unequal_length() {
+        let out = mix_audio(&[1.0, 1.0, 1.0], &[1.0]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], 1.0); // (1+1)/2
+        assert_eq!(out[2], 0.5); // (1+0)/2
+    }
+
+    // -- trim_silence --
+
+    #[test]
+    fn trim_silence_empty() {
+        let out = trim_silence(&[], 44100);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn trim_silence_all_quiet() {
+        let quiet = vec![0.001; 44100];
+        let out = trim_silence(&quiet, 44100);
+        assert_eq!(out.len(), quiet.len(), "all-quiet should return as-is");
+    }
+
+    #[test]
+    fn trim_silence_preserves_loud() {
+        let mut samples = vec![0.0; 44100]; // 1s silence
+        samples.push(0.5); // loud sample
+        samples.extend(vec![0.0; 44100]); // 1s silence
+        let out = trim_silence(&samples, 44100);
+        // Should include the loud sample + safety buffer on each side
+        assert!(out.len() < samples.len());
+        assert!(out.iter().any(|&s| s == 0.5));
+    }
+
+    // -- downsample --
+
+    #[test]
+    fn downsample_identity() {
+        let input = vec![1.0, 2.0, 3.0, 4.0];
+        let out = downsample(&input, 44100, 44100);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn downsample_2x() {
+        let input: Vec<f32> = (0..100).map(|i| i as f32).collect();
+        let out = downsample(&input, 44100, 22050);
+        assert_eq!(out.len(), 50);
+    }
+
+    // -- encode_wav --
+
+    #[test]
+    fn encode_wav_roundtrip() {
+        let samples = vec![0.0, 0.5, -0.5, 1.0, -1.0];
+        let wav = encode_wav(&samples, 16000, 1).expect("encode should succeed");
+        // WAV header is 44 bytes, then 2 bytes per sample
+        assert!(wav.len() >= 44 + samples.len() * 2);
+        // Verify it's a valid WAV by reading it back
+        let reader = hound::WavReader::new(std::io::Cursor::new(&wav)).expect("valid WAV");
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.spec().channels, 1);
+    }
+
+    #[test]
+    fn encode_wav_clamps_out_of_range() {
+        // Values beyond [-1, 1] should be clamped, not overflow
+        let samples = vec![2.0, -2.0];
+        let wav = encode_wav(&samples, 16000, 1).expect("encode should succeed");
+        let mut reader = hound::WavReader::new(std::io::Cursor::new(&wav)).unwrap();
+        let decoded: Vec<i16> = reader.samples::<i16>().map(|s| s.unwrap()).collect();
+        assert_eq!(decoded[0], i16::MAX);
+        assert_eq!(decoded[1], i16::MIN + 1); // -1.0 * 32767 = -32767
+    }
 }

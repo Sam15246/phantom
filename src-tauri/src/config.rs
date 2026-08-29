@@ -175,3 +175,54 @@ pub fn parse_pdf(pdf_b64: String) -> Result<String, String> {
 
     Ok(cleaned)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let plaintext = b"hello phantom";
+        let encrypted = encrypt(plaintext).expect("encrypt should succeed");
+        let decrypted = decrypt(&encrypted).expect("decrypt should succeed");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn nonce_uniqueness() {
+        let data = b"same data";
+        let enc1 = encrypt(data).unwrap();
+        let enc2 = encrypt(data).unwrap();
+        // Random nonce means same plaintext produces different ciphertext
+        assert_ne!(enc1, enc2);
+    }
+
+    #[test]
+    fn tamper_rejection() {
+        let encrypted = encrypt(b"secret").unwrap();
+        let mut tampered = encrypted.clone();
+        // Flip a bit in the ciphertext (after the 12-byte nonce)
+        if tampered.len() > 12 {
+            tampered[12] ^= 0xFF;
+        }
+        assert!(decrypt(&tampered).is_err(), "tampered ciphertext should fail auth");
+    }
+
+    #[test]
+    fn truncated_input_rejected() {
+        assert!(decrypt(&[0u8; 5]).is_err(), "data shorter than nonce should fail");
+    }
+
+    #[test]
+    fn phantom_config_defaults() {
+        let cfg: PhantomConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.audio_source, "both");
+        assert_eq!(cfg.theme, "normal");
+        assert!(!cfg.tts_enabled);
+        assert!(cfg.openai_api_key.is_empty());
+    }
+}
