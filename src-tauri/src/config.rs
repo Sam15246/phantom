@@ -21,6 +21,12 @@ pub struct PhantomConfig {
     pub resume_text: String,
     pub job_description: String,
     pub tts_enabled: bool,
+    /// Custom base URL for OpenAI API calls (e.g. "https://my-proxy.example.com")
+    /// When set, replaces "https://api.openai.com" in all OpenAI API requests.
+    pub openai_base_url: String,
+    /// Custom base URL for Groq API calls (e.g. "https://my-proxy.example.com")
+    /// When set, replaces "https://api.groq.com" in all Groq API requests.
+    pub groq_base_url: String,
 }
 
 impl Default for PhantomConfig {
@@ -33,6 +39,28 @@ impl Default for PhantomConfig {
             resume_text: String::new(),
             job_description: String::new(),
             tts_enabled: false,
+            openai_base_url: String::new(),
+            groq_base_url: String::new(),
+        }
+    }
+}
+
+impl PhantomConfig {
+    /// Returns the OpenAI base URL, using custom proxy if configured, otherwise default.
+    pub fn openai_url(&self) -> &str {
+        if self.openai_base_url.is_empty() {
+            "https://api.openai.com"
+        } else {
+            self.openai_base_url.trim_end_matches('/')
+        }
+    }
+
+    /// Returns the Groq base URL, using custom proxy if configured, otherwise default.
+    pub fn groq_url(&self) -> &str {
+        if self.groq_base_url.is_empty() {
+            "https://api.groq.com"
+        } else {
+            self.groq_base_url.trim_end_matches('/')
         }
     }
 }

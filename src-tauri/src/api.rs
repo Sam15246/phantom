@@ -41,7 +41,7 @@ struct TranscriptionResponse {
     text: String,
 }
 
-pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes: Vec<u8>) -> Result<String, String> {
+pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes: Vec<u8>, base_url: &str) -> Result<String, String> {
 
     let part = multipart::Part::bytes(wav_bytes)
         .file_name("recording.wav")
@@ -92,7 +92,7 @@ pub async fn transcribe_audio(client: &reqwest::Client, api_key: &str, wav_bytes
         .part("file", part);
 
     let response = client
-        .post("https://api.openai.com/v1/audio/transcriptions")
+        .post(format!("{base_url}/v1/audio/transcriptions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .multipart(form)
         .send()
@@ -151,7 +151,7 @@ pub struct ExtractionResult {
     pub context: String,
 }
 
-pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, transcript: &str) -> Result<ExtractionResult, String> {
+pub async fn extract_question(client: &reqwest::Client, groq_api_key: &str, transcript: &str, base_url: &str) -> Result<ExtractionResult, String> {
 
     let system_prompt = r#"You are an interview question extractor. Given a transcript, extract:
 1. The core interview question (cleaned up)
@@ -203,7 +203,7 @@ IMPORTANT: The transcript may contain BOTH the interviewer's voice AND the candi
         };
 
         let response = match client
-            .post("https://api.groq.com/openai/v1/chat/completions")
+            .post(format!("{base_url}/openai/v1/chat/completions"))
             .header("Authorization", format!("Bearer {groq_api_key}"))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -1219,6 +1219,7 @@ pub async fn generate_answer_streaming(
     history: &[ChatMessage],
     resume: &str,
     job_description: &str,
+    base_url: &str,
 ) -> Result<String, String> {
     let model = select_model(mode);
     let system_prompt = build_system_prompt(mode, resume, job_description);
@@ -1253,7 +1254,7 @@ pub async fn generate_answer_streaming(
     let _ = app.emit("answer:mode", mode);
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&request_body)
@@ -1266,6 +1267,9 @@ pub async fn generate_answer_streaming(
         let body = response.text().await.unwrap_or_default();
         return Err(format!("Answer API error {status}: {body}"));
     }
+
+    // Check rate limits and warn if running low
+    check_rate_limits(app, "OpenAI", response.headers());
 
     let mut full_answer = String::new();
     let mut stream = response.bytes_stream();
@@ -1314,6 +1318,7 @@ pub async fn analyze_screenshots(
     screenshots_b64: &[String],
     current_mode: &str,
     history: &[ChatMessage],
+    base_url: &str,
 ) -> Result<String, String> {
 
     // Three screenshot prompt categories:
@@ -1460,7 +1465,7 @@ pub async fn analyze_screenshots(
     let _ = app.emit("answer:mode", current_mode);
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
@@ -1473,6 +1478,9 @@ pub async fn analyze_screenshots(
         let body = response.text().await.unwrap_or_default();
         return Err(format!("Vision API error {status}: {body}"));
     }
+
+    // Check rate limits and warn if running low
+    check_rate_limits(app, "OpenAI", response.headers());
 
     let mut full_answer = String::new();
     let mut stream = response.bytes_stream();
@@ -1518,6 +1526,7 @@ pub async fn generate_answer_silent(
     client: &reqwest::Client,
     api_key: &str,
     prompt: &str,
+    base_url: &str,
 ) -> Result<String, String> {
 
     let body = serde_json::json!({
@@ -1530,7 +1539,7 @@ pub async fn generate_answer_silent(
     });
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(format!("{base_url}/v1/chat/completions"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
@@ -1549,7 +1558,7 @@ pub async fn generate_answer_silent(
 }
 
 /// Text-to-speech via OpenAI TTS API — returns audio bytes as base64
-pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str) -> Result<String, String> {
+pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str, base_url: &str) -> Result<String, String> {
 
     // Summarize long answers for TTS (keep under ~200 words for natural speech)
     let tts_text = if text.split_whitespace().count() > 200 {
@@ -1567,7 +1576,7 @@ pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str)
     });
 
     let response = client
-        .post("https://api.openai.com/v1/audio/speech")
+        .post(format!("{base_url}/v1/audio/speech"))
         .header("Authorization", format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .json(&body)
@@ -1583,6 +1592,172 @@ pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str)
 
     let bytes = response.bytes().await.map_err(|e| format!("TTS read error: {e}"))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+// ---------------------------------------------------------------------------
+// API Key Validation & Rate Limit Check
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiKeyStatus {
+    pub provider: String,
+    pub valid: bool,
+    pub error: String,
+    pub remaining_requests: Option<String>,
+    pub remaining_tokens: Option<String>,
+    pub rate_limit_reset: Option<String>,
+}
+
+#[tauri::command]
+pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> {
+    use tauri::Manager;
+
+    let cfg = app.state::<crate::config::ConfigCache>().get()?;
+    let http = app.state::<SharedHttpClient>();
+    let mut results = Vec::new();
+
+    // Test OpenAI key
+    if !cfg.openai_api_key.is_empty() {
+        let url = format!("{}/v1/models", cfg.openai_url());
+        let resp = http.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", cfg.openai_api_key))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => {
+                let headers = r.headers().clone();
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+
+                results.push(ApiKeyStatus {
+                    provider: "OpenAI".to_string(),
+                    valid: status.is_success(),
+                    error: if status.is_success() {
+                        String::new()
+                    } else if status.as_u16() == 401 {
+                        "Invalid API key".to_string()
+                    } else if status.as_u16() == 429 {
+                        "Rate limited or quota exceeded".to_string()
+                    } else {
+                        format!("{status}: {body}")
+                    },
+                    remaining_requests: headers.get("x-ratelimit-remaining-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    rate_limit_reset: headers.get("x-ratelimit-reset-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                });
+            }
+            Err(e) => {
+                results.push(ApiKeyStatus {
+                    provider: "OpenAI".to_string(),
+                    valid: false,
+                    error: format!("Connection failed: {e}"),
+                    remaining_requests: None,
+                    remaining_tokens: None,
+                    rate_limit_reset: None,
+                });
+            }
+        }
+    } else {
+        results.push(ApiKeyStatus {
+            provider: "OpenAI".to_string(),
+            valid: false,
+            error: "No API key configured".to_string(),
+            remaining_requests: None,
+            remaining_tokens: None,
+            rate_limit_reset: None,
+        });
+    }
+
+    // Test Groq key
+    if !cfg.groq_api_key.is_empty() {
+        let url = format!("{}/openai/v1/models", cfg.groq_url());
+        let resp = http.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", cfg.groq_api_key))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => {
+                let headers = r.headers().clone();
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+
+                results.push(ApiKeyStatus {
+                    provider: "Groq".to_string(),
+                    valid: status.is_success(),
+                    error: if status.is_success() {
+                        String::new()
+                    } else if status.as_u16() == 401 {
+                        "Invalid API key".to_string()
+                    } else if status.as_u16() == 429 {
+                        "Rate limited or quota exceeded".to_string()
+                    } else {
+                        format!("{status}: {body}")
+                    },
+                    remaining_requests: headers.get("x-ratelimit-remaining-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    rate_limit_reset: headers.get("x-ratelimit-reset-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                });
+            }
+            Err(e) => {
+                results.push(ApiKeyStatus {
+                    provider: "Groq".to_string(),
+                    valid: false,
+                    error: format!("Connection failed: {e}"),
+                    remaining_requests: None,
+                    remaining_tokens: None,
+                    rate_limit_reset: None,
+                });
+            }
+        }
+    } else {
+        results.push(ApiKeyStatus {
+            provider: "Groq".to_string(),
+            valid: false,
+            error: "No API key configured".to_string(),
+            remaining_requests: None,
+            remaining_tokens: None,
+            rate_limit_reset: None,
+        });
+    }
+
+    Ok(results)
+}
+
+/// Extract rate-limit headers from a response and emit a warning if quota is low.
+pub fn check_rate_limits(app: &AppHandle, provider: &str, headers: &reqwest::header::HeaderMap) {
+    let remaining = headers.get("x-ratelimit-remaining-requests")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+
+    let remaining_tokens = headers.get("x-ratelimit-remaining-tokens")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // Warn if remaining requests < 10 or remaining tokens < 5000
+    if let Some(req) = remaining {
+        if req < 10 {
+            let _ = app.emit("quota:warning", format!(
+                "{provider}: Only {req} requests remaining in current window"
+            ));
+        }
+    }
+    if let Some(tok) = remaining_tokens {
+        if tok < 5000 {
+            let _ = app.emit("quota:warning", format!(
+                "{provider}: Only {tok} tokens remaining in current window"
+            ));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
