@@ -120,6 +120,15 @@
   </div>
 
   <div class="section">
+    <h3>API Proxy (optional)</h3>
+    <label>OpenAI Base URL</label>
+    <input type="text" id="openai-base-url" placeholder="https://api.openai.com (default)" />
+    <label>Groq Base URL</label>
+    <input type="text" id="groq-base-url" placeholder="https://api.groq.com (default)" />
+    <span style="font-size:11px;color:#5a5850;">Route API calls through a proxy to mask DNS/SNI. Leave blank for direct.</span>
+  </div>
+
+  <div class="section">
     <h3>Resume</h3>
     <div style="display:flex;gap:6px;margin-bottom:8px;">
       <button id="btn-upload-resume" style="font-size:11px;padding:4px 10px;">Upload PDF</button>
@@ -153,6 +162,8 @@
       'theme': 'theme',
       'resume-text': 'resume_text',
       'job-description': 'job_description',
+      'openai-base-url': 'openai_base_url',
+      'groq-base-url': 'groq_base_url',
     };
 
     async function loadSettings() {

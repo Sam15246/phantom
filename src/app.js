@@ -532,6 +532,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('screenshot-count').style.display = 'none';
   });
 
+  // --- Proctoring Detection ---
+  await listen('proctor:scan-result', (event) => {
+    const report = event.payload;
+    const indicator = document.getElementById('proctor-indicator');
+    if (!indicator) return;
+
+    indicator.style.display = 'inline';
+
+    // Remove all previous threat classes
+    indicator.className = '';
+
+    const level = report.threat_level;
+    if (level === 'Clear') {
+      indicator.className = 'threat-clear';
+      indicator.title = 'No proctoring detected';
+    } else if (level === 'Low') {
+      indicator.className = 'threat-low';
+      indicator.title = 'Low-risk proctoring: ' + report.vendors.map(v => v.name).join(', ');
+    } else if (level === 'Medium') {
+      indicator.className = 'threat-medium';
+      indicator.title = 'Medium-risk proctoring: ' + report.vendors.map(v => v.name).join(', ');
+    } else if (level === 'High') {
+      indicator.className = 'threat-high';
+      indicator.title = 'High-risk proctoring: ' + report.vendors.map(v => v.name).join(', ');
+    } else if (level === 'Critical') {
+      indicator.className = 'threat-critical';
+      indicator.title = 'CRITICAL: ' + report.vendors.map(v => v.name).join(', ') +
+        ' — WDA detection active!';
+    }
+
+    // Store report globally for adaptive behavior
+    window._proctorReport = report;
+
+    // Log recommendations in debug
+    if (report.recommendations && report.recommendations.length > 0) {
+      console.log('[proctor] Recommendations:', report.recommendations);
+    }
+  });
+
+  await listen('proctor:adaptation', (event) => {
+    const msg = event.payload;
+    console.log('[proctor] Adaptation:', msg);
+    // Flash the status indicator briefly with the adaptation message
+    const statusEl = document.getElementById('status-indicator');
+    if (statusEl) {
+      const prevText = statusEl.textContent;
+      const prevColor = statusEl.style.color;
+      statusEl.textContent = '● ' + msg;
+      statusEl.style.color = '#c49a3a';
+      setTimeout(() => {
+        statusEl.textContent = prevText;
+        statusEl.style.color = prevColor;
+      }, 4000);
+    }
+  });
+
   await listen('session:cleared', () => {
     currentAnswer = '';
     window._lastTranscript = '';
