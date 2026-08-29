@@ -94,6 +94,8 @@
     <input type="password" id="openai-key" placeholder="sk-..." />
     <label>Groq API Key (optional)</label>
     <input type="password" id="groq-key" placeholder="gsk_..." />
+    <button id="btn-test-keys" style="font-size:11px;padding:4px 10px;margin-top:4px;">Test Keys</button>
+    <div id="key-test-results" style="margin-top:8px;font-size:12px;display:none;"></div>
   </div>
 
   <div class="section">
@@ -246,10 +248,50 @@
       fileInput.value = '';
     }
 
+    async function testApiKeys() {
+      const btn = document.getElementById('btn-test-keys');
+      const resultsDiv = document.getElementById('key-test-results');
+      btn.disabled = true;
+      btn.textContent = 'Testing...';
+      resultsDiv.style.display = 'block';
+      resultsDiv.innerHTML = '<span style="color:#7a7870;">Checking API keys...</span>';
+
+      try {
+        // Save current values first so the test uses what's on screen
+        await saveSettings();
+        const results = await window.__TAURI__.core.invoke('test_api_keys');
+        resultsDiv.textContent = '';
+        for (const r of results) {
+          const row = document.createElement('div');
+          row.style.marginBottom = '6px';
+          const color = r.valid ? '#6a8a5a' : '#e06050';
+          const icon = r.valid ? '\u2713' : '\u2717';
+          let text = icon + ' ' + r.provider;
+          if (!r.valid) {
+            text += ' \u2014 ' + r.error;
+          } else {
+            text += ' \u2014 Valid';
+            if (r.remaining_requests) text += ' | Requests left: ' + r.remaining_requests;
+            if (r.remaining_tokens) text += ' | Tokens left: ' + r.remaining_tokens;
+            if (r.rate_limit_reset) text += ' | Resets: ' + r.rate_limit_reset;
+          }
+          row.textContent = text;
+          row.style.color = color;
+          resultsDiv.appendChild(row);
+        }
+      } catch (e) {
+        resultsDiv.textContent = 'Test failed: ' + e;
+        resultsDiv.style.color = '#e06050';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Test Keys';
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       loadSettings();
       document.getElementById('btn-save').addEventListener('click', saveSettings);
       document.getElementById('btn-cancel').addEventListener('click', closeSettings);
+      document.getElementById('btn-test-keys').addEventListener('click', testApiKeys);
 
       // PDF upload buttons
       document.getElementById('btn-upload-resume').addEventListener('click', () => {

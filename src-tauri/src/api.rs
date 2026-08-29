@@ -1268,6 +1268,9 @@ pub async fn generate_answer_streaming(
         return Err(format!("Answer API error {status}: {body}"));
     }
 
+    // Check rate limits and warn if running low
+    check_rate_limits(app, "OpenAI", response.headers());
+
     let mut full_answer = String::new();
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
@@ -1476,6 +1479,9 @@ pub async fn analyze_screenshots(
         return Err(format!("Vision API error {status}: {body}"));
     }
 
+    // Check rate limits and warn if running low
+    check_rate_limits(app, "OpenAI", response.headers());
+
     let mut full_answer = String::new();
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
@@ -1586,6 +1592,172 @@ pub async fn text_to_speech(client: &reqwest::Client, api_key: &str, text: &str,
 
     let bytes = response.bytes().await.map_err(|e| format!("TTS read error: {e}"))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+// ---------------------------------------------------------------------------
+// API Key Validation & Rate Limit Check
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiKeyStatus {
+    pub provider: String,
+    pub valid: bool,
+    pub error: String,
+    pub remaining_requests: Option<String>,
+    pub remaining_tokens: Option<String>,
+    pub rate_limit_reset: Option<String>,
+}
+
+#[tauri::command]
+pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> {
+    use tauri::Manager;
+
+    let cfg = app.state::<crate::config::ConfigCache>().get()?;
+    let http = app.state::<SharedHttpClient>();
+    let mut results = Vec::new();
+
+    // Test OpenAI key
+    if !cfg.openai_api_key.is_empty() {
+        let url = format!("{}/v1/models", cfg.openai_url());
+        let resp = http.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", cfg.openai_api_key))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => {
+                let headers = r.headers().clone();
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+
+                results.push(ApiKeyStatus {
+                    provider: "OpenAI".to_string(),
+                    valid: status.is_success(),
+                    error: if status.is_success() {
+                        String::new()
+                    } else if status.as_u16() == 401 {
+                        "Invalid API key".to_string()
+                    } else if status.as_u16() == 429 {
+                        "Rate limited or quota exceeded".to_string()
+                    } else {
+                        format!("{status}: {body}")
+                    },
+                    remaining_requests: headers.get("x-ratelimit-remaining-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    rate_limit_reset: headers.get("x-ratelimit-reset-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                });
+            }
+            Err(e) => {
+                results.push(ApiKeyStatus {
+                    provider: "OpenAI".to_string(),
+                    valid: false,
+                    error: format!("Connection failed: {e}"),
+                    remaining_requests: None,
+                    remaining_tokens: None,
+                    rate_limit_reset: None,
+                });
+            }
+        }
+    } else {
+        results.push(ApiKeyStatus {
+            provider: "OpenAI".to_string(),
+            valid: false,
+            error: "No API key configured".to_string(),
+            remaining_requests: None,
+            remaining_tokens: None,
+            rate_limit_reset: None,
+        });
+    }
+
+    // Test Groq key
+    if !cfg.groq_api_key.is_empty() {
+        let url = format!("{}/openai/v1/models", cfg.groq_url());
+        let resp = http.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", cfg.groq_api_key))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => {
+                let headers = r.headers().clone();
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+
+                results.push(ApiKeyStatus {
+                    provider: "Groq".to_string(),
+                    valid: status.is_success(),
+                    error: if status.is_success() {
+                        String::new()
+                    } else if status.as_u16() == 401 {
+                        "Invalid API key".to_string()
+                    } else if status.as_u16() == 429 {
+                        "Rate limited or quota exceeded".to_string()
+                    } else {
+                        format!("{status}: {body}")
+                    },
+                    remaining_requests: headers.get("x-ratelimit-remaining-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                    rate_limit_reset: headers.get("x-ratelimit-reset-requests")
+                        .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
+                });
+            }
+            Err(e) => {
+                results.push(ApiKeyStatus {
+                    provider: "Groq".to_string(),
+                    valid: false,
+                    error: format!("Connection failed: {e}"),
+                    remaining_requests: None,
+                    remaining_tokens: None,
+                    rate_limit_reset: None,
+                });
+            }
+        }
+    } else {
+        results.push(ApiKeyStatus {
+            provider: "Groq".to_string(),
+            valid: false,
+            error: "No API key configured".to_string(),
+            remaining_requests: None,
+            remaining_tokens: None,
+            rate_limit_reset: None,
+        });
+    }
+
+    Ok(results)
+}
+
+/// Extract rate-limit headers from a response and emit a warning if quota is low.
+pub fn check_rate_limits(app: &AppHandle, provider: &str, headers: &reqwest::header::HeaderMap) {
+    let remaining = headers.get("x-ratelimit-remaining-requests")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+
+    let remaining_tokens = headers.get("x-ratelimit-remaining-tokens")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // Warn if remaining requests < 10 or remaining tokens < 5000
+    if let Some(req) = remaining {
+        if req < 10 {
+            let _ = app.emit("quota:warning", format!(
+                "{provider}: Only {req} requests remaining in current window"
+            ));
+        }
+    }
+    if let Some(tok) = remaining_tokens {
+        if tok < 5000 {
+            let _ = app.emit("quota:warning", format!(
+                "{provider}: Only {tok} tokens remaining in current window"
+            ));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

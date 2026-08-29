@@ -588,6 +588,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  await listen('quota:warning', (event) => {
+    const msg = event.payload;
+    console.warn('[quota]', msg);
+    const statusEl = document.getElementById('status-indicator');
+    if (statusEl) {
+      const prevText = statusEl.textContent;
+      const prevColor = statusEl.style.color;
+      statusEl.textContent = '\u26a0 ' + msg;
+      statusEl.style.color = '#e06050';
+      setTimeout(() => {
+        statusEl.textContent = prevText;
+        statusEl.style.color = prevColor;
+      }, 6000);
+    }
+  });
+
   await listen('session:cleared', () => {
     currentAnswer = '';
     window._lastTranscript = '';

@@ -425,6 +425,7 @@ fn main() {
             screenshot::clear_screenshots,
             proctor_detect::proctor_scan,
             proctor_detect::proctor_quick_scan,
+            api::test_api_keys,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
