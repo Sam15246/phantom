@@ -1630,12 +1630,18 @@ pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> 
     let http = app.state::<SharedHttpClient>();
     let mut results = Vec::new();
 
-    // Test OpenAI key
+    // Test OpenAI key with a minimal completion (1 token) to verify billing
     if !cfg.openai_api_key.is_empty() {
-        let url = format!("{}/v1/models", cfg.openai_url());
+        let url = format!("{}/v1/chat/completions", cfg.openai_url());
         let resp = http.client
-            .get(&url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", cfg.openai_api_key))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1
+            }))
             .send()
             .await;
 
@@ -1645,18 +1651,25 @@ pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> 
                 let status = r.status();
                 let body = r.text().await.unwrap_or_default();
 
+                let (valid, error) = if status.is_success() {
+                    (true, String::new())
+                } else if status.as_u16() == 401 {
+                    (false, "Invalid API key".to_string())
+                } else if status.as_u16() == 429 {
+                    // Distinguish rate limit from billing exhaustion
+                    if body.contains("insufficient_quota") || body.contains("exceeded") || body.contains("billing") {
+                        (false, "Billing quota exhausted — add credits at platform.openai.com".to_string())
+                    } else {
+                        (false, "Rate limited — try again shortly".to_string())
+                    }
+                } else {
+                    (false, format!("{status}: {body}"))
+                };
+
                 results.push(ApiKeyStatus {
                     provider: "OpenAI".to_string(),
-                    valid: status.is_success(),
-                    error: if status.is_success() {
-                        String::new()
-                    } else if status.as_u16() == 401 {
-                        "Invalid API key".to_string()
-                    } else if status.as_u16() == 429 {
-                        "Rate limited or quota exceeded".to_string()
-                    } else {
-                        format!("{status}: {body}")
-                    },
+                    valid,
+                    error,
                     remaining_requests: headers.get("x-ratelimit-remaining-requests")
                         .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
                     remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
@@ -1687,12 +1700,18 @@ pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> 
         });
     }
 
-    // Test Groq key
+    // Test Groq key with a minimal completion (1 token)
     if !cfg.groq_api_key.is_empty() {
-        let url = format!("{}/openai/v1/models", cfg.groq_url());
+        let url = format!("{}/openai/v1/chat/completions", cfg.groq_url());
         let resp = http.client
-            .get(&url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", cfg.groq_api_key))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1
+            }))
             .send()
             .await;
 
@@ -1702,18 +1721,24 @@ pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> 
                 let status = r.status();
                 let body = r.text().await.unwrap_or_default();
 
+                let (valid, error) = if status.is_success() {
+                    (true, String::new())
+                } else if status.as_u16() == 401 {
+                    (false, "Invalid API key".to_string())
+                } else if status.as_u16() == 429 {
+                    if body.contains("insufficient_quota") || body.contains("exceeded") || body.contains("billing") {
+                        (false, "Billing quota exhausted".to_string())
+                    } else {
+                        (false, "Rate limited — try again shortly".to_string())
+                    }
+                } else {
+                    (false, format!("{status}: {body}"))
+                };
+
                 results.push(ApiKeyStatus {
                     provider: "Groq".to_string(),
-                    valid: status.is_success(),
-                    error: if status.is_success() {
-                        String::new()
-                    } else if status.as_u16() == 401 {
-                        "Invalid API key".to_string()
-                    } else if status.as_u16() == 429 {
-                        "Rate limited or quota exceeded".to_string()
-                    } else {
-                        format!("{status}: {body}")
-                    },
+                    valid,
+                    error,
                     remaining_requests: headers.get("x-ratelimit-remaining-requests")
                         .and_then(|v| v.to_str().ok()).map(|s| s.to_string()),
                     remaining_tokens: headers.get("x-ratelimit-remaining-tokens")
