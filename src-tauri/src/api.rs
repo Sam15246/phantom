@@ -1708,7 +1708,7 @@ pub async fn test_api_keys(app: AppHandle) -> Result<Vec<ApiKeyStatus>, String> 
             .header("Authorization", format!("Bearer {}", cfg.groq_api_key))
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-20b",
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1
             }))
