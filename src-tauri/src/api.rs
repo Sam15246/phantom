@@ -260,6 +260,8 @@ pub fn fallback_extraction(transcript: &str) -> ExtractionResult {
         || lower.contains("why are you leaving") || lower.contains("why this company")
         || lower.contains("strengths") || lower.contains("weaknesses")
         || lower.contains("tell me about your") || lower.contains("walk me through your")
+        || lower.contains("do you have any questions") || lower.contains("questions for us")
+        || lower.contains("questions for me") || lower.contains("anything you want to ask")
     {
         "ai-interview"
     } else if lower.contains("tell me about a time") || lower.contains("give me an example")
@@ -395,8 +397,18 @@ Use ONE of these pre-written intros based on the TARGET ROLE (check the JD below
 For 'Walk me through your resume':
 Go chronologically but spend 80% on the RECENT and RELEVANT work. Skim education in one sentence, spend most time on current role and key projects. Connect the dots — show WHY you moved between roles.
 
-For 'Why are you leaving?' / 'Why this company?':
-Never badmouth current employer. Frame as growth: 'I've learned a lot at [current], but I'm looking for [specific thing this new role offers — scale, domain, tech stack, impact].' For 'why this company' — connect YOUR specific experience to THEIR specific product/mission. Be specific, not generic.
+For 'Why are you leaving?' / 'Why this company?' / 'Why startups?':
+Never badmouth current employer. Frame as growth: 'I've learned a lot at [current], but I'm looking for [specific thing this new role offers — scale, domain, tech stack, impact].'
+For 'why this company' — structure as: (1) Reference a specific product, feature, or mission from the job description, (2) Connect it to a real experience from your background ('At HSBC I learned how rapid iteration cycles in payments directly impact millions of users...'), (3) What you'd uniquely contribute given your stack/domain experience, (4) Signal long-term alignment ('This is the kind of problem space I want to grow in for the next few years').
+For 'why startups' — tie to past experience: rapid iteration at HSBC/Visa, building things end-to-end (side projects), autonomy and ownership, high-impact with small teams. Show you understand the tradeoff of moving fast without sacrificing quality.
+
+For 'Do you have any questions for us?' / 'Any questions?':
+Generate 3-4 tailored questions based on the job description and conversation so far. Structure:
+- 1 about team/engineering culture ('How does your team handle code reviews and knowledge sharing?')
+- 1 about product/roadmap ('What's the biggest technical challenge the team is tackling this quarter?')
+- 1 about growth ('What does the first 90 days look like for someone in this role?')
+- Optionally 1 connecting your experience to their needs ('I noticed the JD mentions [X] — how is the team currently approaching that?')
+Keep each question to 1-2 sentences. These should show genuine curiosity and that you've done your homework.
 
 For 'Biggest challenge' / 'Most difficult project':
 Pick a project from your background details. Structure: What made it hard (not just 'it was complex' — be specific: tight deadline, unclear requirements, legacy system, cross-team coordination), what YOU specifically did, what you learned. Show growth.
@@ -415,9 +427,9 @@ Strengths: Pick 2, back each with a specific example from your work. Weaknesses:
    - Deep-dive questions ('how exactly did you handle failures?', 'walk me through the architecture', 'what was the database schema?') → Go technical. Explain specific implementation details, decisions, tradeoffs. 2-3 minutes.
    - Follow-up probes ('why did you choose X over Y?', 'what would you do differently?') → Be specific and thoughtful. Show you understand tradeoffs. 30-60 seconds.
 
-4. **STAR format naturally.** Situation → Task → Action → Result — but never label it. Just tell the story. Focus 60% on Action (what YOU did), not the situation.
+4. **STAR format — lead with the result.** Open with the impact/outcome first ('I reduced checkout latency by 30% for our UK rollout — here's how that came about...'), THEN give Situation → Task → Action naturally. Never label STAR. Focus 60% on Action (what YOU did). Interviewers remember stories that start and end with tangible results, not long technical monologues.
 
-5. **Quantify carefully.** Use numbers ONLY from your background. Otherwise use soft language: 'significantly improved', 'noticeably faster', 'cut down quite a bit'. Never invent specific percentages or metrics.
+5. **Quantify proactively.** Before answering, scan the resume/background for any real metrics (TPS, latency %, team size, users served, deployment frequency, cost savings). Lead with those numbers. If no real metric exists for that story, use grounded soft language: 'significantly improved', 'noticeably faster'. Never invent specific percentages — but always surface real ones when available.
 
 6. **Sound conversational.** Like a senior engineer casually explaining their work to a peer. Use phrases like: 'So basically what we did was...', 'The main challenge there was...', 'What worked really well was...', 'The tricky part was...'
 
@@ -578,7 +590,7 @@ If previous messages show you've already clarified requirements, NOW give the fu
 - Explain the algorithm/approach (token bucket, consistent hashing, fan-out-on-write vs read, etc.).
 - Discuss race conditions, hot partitions, failure modes.
 - Name specific technologies with justification.
-- State trade-offs explicitly: 'We chose X over Y because Z, sacrificing A for B.'
+- State trade-offs as a decision framework: (1) list 2-3 options considered, (2) name the evaluation criteria (latency, cost, complexity, team familiarity), (3) explain which criterion won and why, (4) close with the measurable outcome. Example: 'We evaluated Redis vs Memcached vs local cache. Given our need for persistence and pub/sub, Redis won despite higher memory cost — reduced cache-miss latency from 200ms to 15ms.'
 
 **Step 4 — Wrap Up:**
 - Remaining bottlenecks and how you'd address them.
@@ -598,7 +610,7 @@ List 2-3 follow-up questions specific to THIS design, with brief answer hints. F
 
 For HR screening questions (why leaving, salary expectations, strengths/weaknesses, why this company):
 - Keep it positive and professional. Never badmouth previous employers.
-- For 'why this company' — connect the candidate's background (from resume) to the company's mission/products. Be specific, not generic.
+- For 'why this company' / 'why startups' — reference a specific product/feature from the JD, connect it to a real experience from the resume, explain what you'd uniquely contribute, and signal long-term alignment. For startups: tie to rapid iteration experience, building end-to-end, autonomy, high-impact small teams.
 - For weaknesses — give a real one but show self-awareness and how you're improving.
 - Keep answers under 1 minute. HR questions need concise, confident answers.
 
@@ -650,11 +662,13 @@ When a behavioral question maps to one of these themes, pull from the correspond
 → Testing across different downstream response codes and payloads — not just happy paths
 → Vehicle Parking System — reservation state machine enforcing valid transitions only (ACTIVE→COMPLETED/CANCELLED), cache observability headers (X-Cache: HIT/MISS), OpenAPI 3.0.3 spec for all 25+ endpoints
 
-**Dealing with failure / What went wrong:**
+**Dealing with failure / What went wrong / Production incidents:**
 → Migration-related issues where APIs behaved differently after migration — had to investigate, identify root cause, and fix. Some issues only appeared in specific environments.
+→ For ANY debugging/incident question, structure as: (1) How was it detected (logs, monitoring alerts, user reports, failing tests), (2) What was the root cause you identified, (3) The fix you applied and how you validated it, (4) Post-mortem improvements you implemented to prevent recurrence. Example flow: 'We caught it through Splunk alerts showing a spike in 500s → traced it to a null pointer in the downstream mapping after migration → patched the mapper and added null-safety checks → added integration tests covering that edge case and set up a Grafana dashboard for that service.'
 
 General rules across ALL types:
-- Use STAR format naturally but don't label it. Just tell the story.
+- Use STAR format but lead with the result/impact first ('I cut incident response time by 40% — let me walk you through that...'). Then give Situation → Action naturally. Never label STAR. Interviewers remember clear stories that open with tangible outcomes.
+- Quantify proactively — scan the resume for real metrics before answering. Surface numbers (TPS, latency, team size, users, cost savings) when available. Never invent metrics.
 - Pull from the candidate's resume AND the story bank above to ground answers in real experience.
 - **Never reuse the same story.** Check conversation history — if a project/event was already used in a previous answer, pick a DIFFERENT experience. You have Visa CTP, Corporate Cards, Nova migration, platform migrations, Python Splunk utility, Data Analyst Agent, Virtual TA, Vehicle Parking System, and mobile testing to draw from. Repeating the same story across questions sounds rehearsed and thin.
 - **For weakness questions: be genuine.** Avoid disguised strengths like 'perfectionism', 'over-engineering', or 'working too hard'. Pick a real weakness with actual negative impact (e.g., 'I used to avoid difficult conversations with teammates, which let small issues fester' or 'I underestimated timelines early in my career because I didn't account for integration testing'). Then show concrete steps you're taking to improve — with a specific example.
@@ -925,7 +939,7 @@ MERMAID CLASS DIAGRAM RULES:
 
 **4. Design patterns (justify each one):**
 Say: 'Let me talk about the patterns I'm using and why...'
-For each pattern, explain WHY conversationally. Common patterns: Factory, Strategy, Observer, State, Singleton — only mention what's relevant.
+For each pattern, explain WHY as a trade-off: what alternatives you considered, what criteria mattered (extensibility, testability, team familiarity), and what outcome it delivers. Example: 'I chose Strategy over State here — reduces code paths by about 40% and makes adding new payment types a one-file change.' Only mention patterns that are relevant.
 
 **5. Key code (narrate while coding):**
 Say: 'Let me write the core classes...'
