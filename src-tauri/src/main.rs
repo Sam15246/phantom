@@ -177,12 +177,12 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         (extraction.question, mode, extraction.context)
     };
 
-    // Get recent history for context (cap at last 20 messages — ~10 Q&A pairs)
-    // Keeping this lean reduces input tokens and speeds up time-to-first-token
+    // Get recent history for context (cap at last 12 messages — ~6 Q&A pairs)
+    // Beyond 6 exchanges, older context rarely matters and wastes input tokens
     let hist: Vec<api::ChatMessage> = {
         let msgs = history_state.messages.lock().unwrap_or_else(|e| e.into_inner());
-        if msgs.len() > 20 {
-            msgs[msgs.len() - 20..].to_vec()
+        if msgs.len() > 12 {
+            msgs[msgs.len() - 12..].to_vec()
         } else {
             msgs.clone()
         }
@@ -246,8 +246,8 @@ async fn ask_followup(
     };
     let hist: Vec<api::ChatMessage> = {
         let msgs = history_state.messages.lock().unwrap_or_else(|e| e.into_inner());
-        if msgs.len() > 20 {
-            msgs[msgs.len() - 20..].to_vec()
+        if msgs.len() > 12 {
+            msgs[msgs.len() - 12..].to_vec()
         } else {
             msgs.clone()
         }
@@ -379,7 +379,7 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
         &http.client,
         &cfg.openai_api_key,
         &format!("Generate a post-interview summary for this conversation:\n\n{conversation}"),
-        "general",
+        "summary",
         "",
         &[],
         &cfg.job_description,
@@ -963,10 +963,14 @@ fn main() {
                             }
                         };
 
-                        // Snapshot conversation history for the model to see previous solutions
-                        let history_snapshot = {
+                        // Send minimal history (last 2 msgs) for follow-up context without wasting tokens
+                        let history_snapshot: Vec<api::ChatMessage> = {
                             let msgs = history_guard.messages.lock().unwrap_or_else(|e| e.into_inner());
-                            msgs.clone()
+                            if msgs.len() > 2 {
+                                msgs[msgs.len() - 2..].to_vec()
+                            } else {
+                                msgs.clone()
+                            }
                         };
 
                         let http = ah.state::<api::SharedHttpClient>();

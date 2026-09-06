@@ -393,6 +393,7 @@ fn select_model(mode: &str) -> &'static str {
     match mode {
         "dsa" | "oa" | "ai-interview" | "ai-ml" | "project-deep-dive" => "gpt-5.6-sol",
         "system-design" | "lld" | "dbms" | "cloud" | "java" | "backend" | "python" | "qa" => "gpt-5.6-terra",
+        "summary" => "gpt-4o-mini",
         "behavioral" | _ => "gpt-5.6-luna",
     }
 }
@@ -1467,15 +1468,15 @@ pub async fn analyze_screenshots(
         }));
     }
 
-    // Build messages: system → recent history (last 6 messages max) → user with screenshots
+    // Build messages: system → recent history (last 2 messages) → user with screenshots
     let mut messages = vec![serde_json::json!({
         "role": "system",
         "content": system_prompt
     })];
 
-    // Inject recent conversation history (trimmed to save tokens)
-    let history_tail = trim_history(if history.len() > 6 {
-        &history[history.len() - 6..]
+    // Inject last Q&A pair for follow-up context (trimmed to save vision tokens)
+    let history_tail = trim_history(if history.len() > 2 {
+        &history[history.len() - 2..]
     } else {
         history
     });
@@ -1896,5 +1897,10 @@ mod tests {
         assert_eq!(select_model("behavioral"), "gpt-5.6-luna");
         assert_eq!(select_model("unknown-mode"), "gpt-5.6-luna");
         assert_eq!(select_model("general"), "gpt-5.6-luna");
+    }
+
+    #[test]
+    fn select_model_summary_uses_mini() {
+        assert_eq!(select_model("summary"), "gpt-4o-mini");
     }
 }
