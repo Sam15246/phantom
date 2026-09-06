@@ -15,6 +15,26 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Truncate assistant messages in history to save input tokens.
+/// Keeps the last ~200 words of each assistant message (most recent/relevant part).
+/// User messages are kept in full since they're typically short.
+pub fn trim_history(history: &[ChatMessage]) -> Vec<ChatMessage> {
+    history.iter().map(|msg| {
+        if msg.role == "assistant" && msg.content.split_whitespace().count() > 200 {
+            // Keep first 60 words (intro/context) + last 140 words (conclusion/code)
+            let words: Vec<&str> = msg.content.split_whitespace().collect();
+            let first = words[..60].join(" ");
+            let last = words[words.len() - 140..].join(" ");
+            ChatMessage {
+                role: msg.role.clone(),
+                content: format!("{first} [...] {last}"),
+            }
+        } else {
+            msg.clone()
+        }
+    }).collect()
+}
+
 /// Shared HTTP client — reuses TCP+TLS connections across API calls
 pub struct SharedHttpClient {
     pub client: reqwest::Client,
@@ -377,7 +397,7 @@ fn select_model(mode: &str) -> &'static str {
     }
 }
 
-fn build_system_prompt(mode: &str, resume: &str, job_description: &str) -> String {
+fn build_system_prompt(mode: &str, job_description: &str) -> String {
     let base = match mode {
         "ai-interview" => "You ARE the candidate in this interview. Answer in FIRST PERSON as if you are the person whose resume/background is provided below. This is critical — never say 'the candidate did X', say 'I did X'. Never break character. Never say 'based on the resume' or 'according to your background'.
 
@@ -1189,41 +1209,36 @@ Listen carefully to scope cues in the question. If they ask for 'basic' or 'simp
 - Never list more than 3 tools/frameworks for any category. Pick the 2-3 most important ones and explain them. Listing 8 options signals you googled it, not that you know it.");
     }
 
-    // Inject resume/JD for modes that benefit from candidate context.
-    // DSA and OA are pure coding — no resume needed. General is too broad.
-    let needs_resume = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "lld" | "cloud" | "qa" | "project-deep-dive");
-    if needs_resume && !resume.is_empty() {
-        prompt.push_str(&format!("\n\n=== YOUR BACKGROUND (resume + project details) ===\nEverything below is YOUR real experience. Use these details to give contextually relevant examples when it helps — e.g., referencing your own projects as examples in system design, or mentioning technologies you've actually used. Do NOT invent alternatives when details are provided here.\n\n{resume}"));
-    }
-    if needs_resume && !job_description.is_empty() {
+    // Inject JD and experience context for modes that benefit from candidate context.
+    // DSA and OA are pure coding — no context needed. General is too broad.
+    let needs_context = matches!(mode, "ai-interview" | "behavioral" | "ai-ml" | "system-design" | "backend" | "java" | "python" | "lld" | "cloud" | "qa" | "project-deep-dive");
+    if needs_context && !job_description.is_empty() {
         prompt.push_str(&format!("\n\n=== TARGET ROLE (tailor your answers toward this) ===\n{job_description}"));
     }
 
-    // Inject detailed experience context for modes that benefit from project-level depth
-    if needs_resume {
+    // Inject experience context — this is the sole source of candidate background
+    if needs_context {
         let experience = crate::experience::experience_for_mode(mode);
         if !experience.is_empty() {
-            prompt.push_str(&format!("\n\n=== DETAILED EXPERIENCE CONTEXT ===\nThe following contains detailed information about your professional experience, specific projects, domain expertise and technical depth. Use this to give answers grounded in your ACTUAL work — specific APIs, state codes, orchestration flows, testing strategies, tools you've used.\n\n{experience}"));
+            prompt.push_str(&format!("\n\n=== YOUR BACKGROUND & EXPERIENCE ===\nEverything below is YOUR real experience. Use these details to give answers grounded in your ACTUAL work — specific APIs, state codes, orchestration flows, testing strategies, tools you've used. Do NOT invent alternatives when details are provided here.\n\n{experience}"));
         }
     }
 
     // Honesty framing — match confidence level to actual experience
-    if needs_resume && !resume.is_empty() {
+    if needs_context {
         prompt.push_str("\n\nCRITICAL — Honest experience framing:
-Before answering, mentally check: is this topic something the candidate has ACTUALLY worked with (mentioned in their resume/projects above)?
+Before answering, mentally check: is this topic something you have ACTUALLY worked with (mentioned in your background/experience above)?
 
-If YES (topic is in resume — e.g., RxJava, RAG, Spring Boot, LangChain, microservices):
+If YES (topic is in your experience — e.g., RxJava, RAG, Spring Boot, LangChain, microservices, Cucumber, Appium):
 → Answer confidently in first person: 'In my project at HSBC, I...' or 'When I built my Data Analyst Agent, I handled this by...'
 
-If NO (topic is NOT in resume — e.g., vLLM, Kubernetes Operators, ArgoCD, MIG, KEDA, Triton):
-→ Be upfront that this is from self-learning, NOT production experience. Weave it in naturally — don't make it a disclaimer, make it part of your answer:
+If NO (topic is NOT in your experience — e.g., vLLM, Kubernetes Operators, ArgoCD, MIG, KEDA, Triton):
+→ Be upfront that this is from self-learning, NOT production experience. Weave it in naturally:
   - 'I've been reading about this a lot lately — [explain the concept]. I haven't deployed this in production myself yet, but the way I understand it is...'
-  - 'So I've been following [company/space] closely and studying how they approach this. From what I've gathered...'
-  - 'I don't have hands-on production experience with this yet, but I've been diving deep into it recently because it's clearly where the industry is heading. The core idea is...'
-  - Bridge to adjacent real experience: 'The closest thing I've worked with is [something from resume] — and this is similar in concept because [connection].'
-  - Show genuine curiosity: 'This is actually one of the things I'm most excited to get hands-on with — I've been reading the docs and following the community discussions around it.'
+  - 'I don't have hands-on production experience with this yet, but I've been diving deep into it recently because it's clearly where the industry is heading.'
+  - Bridge to adjacent real experience: 'The closest thing I've worked with is [something from your experience] — and this is similar in concept because [connection].'
 
-NEVER fake production experience you don't have. Interviewers can smell it instantly with one follow-up question. Honest curiosity + solid conceptual understanding + adjacent real experience is 10x more credible than pretending you've deployed something you haven't.
+NEVER fake production experience you don't have. Honest curiosity + solid conceptual understanding + adjacent real experience is 10x more credible than pretending.
 
 Mix these framings naturally — don't use the same one every time.");
     }
@@ -1239,20 +1254,19 @@ pub async fn generate_answer_streaming(
     mode: &str,
     context: &str,
     history: &[ChatMessage],
-    resume: &str,
     job_description: &str,
     base_url: &str,
 ) -> Result<String, String> {
     let model = select_model(mode);
-    let system_prompt = build_system_prompt(mode, resume, job_description);
+    let system_prompt = build_system_prompt(mode, job_description);
 
     let mut messages = vec![ChatMessage {
         role: "system".to_string(),
         content: system_prompt,
     }];
 
-    for msg in history {
-        messages.push(msg.clone());
+    for msg in trim_history(history) {
+        messages.push(msg);
     }
 
     let user_content = if context.is_empty() {
@@ -1459,12 +1473,12 @@ pub async fn analyze_screenshots(
         "content": system_prompt
     })];
 
-    // Inject recent conversation history so the model can see previous solutions
-    let history_tail: Vec<_> = if history.len() > 6 {
-        history[history.len() - 6..].to_vec()
+    // Inject recent conversation history (trimmed to save tokens)
+    let history_tail = trim_history(if history.len() > 6 {
+        &history[history.len() - 6..]
     } else {
-        history.to_vec()
-    };
+        history
+    });
     for msg in &history_tail {
         messages.push(serde_json::json!({
             "role": msg.role,

@@ -198,7 +198,6 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         &effective_mode,
         &context,
         &hist,
-        &cfg.resume_text,
         &cfg.job_description,
         cfg.openai_url(),
     ).await?;
@@ -262,7 +261,6 @@ async fn ask_followup(
         &mode,
         "",
         &hist,
-        &cfg.resume_text,
         &cfg.job_description,
         cfg.openai_url(),
     ).await;
@@ -384,7 +382,6 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
         "general",
         "",
         &[],
-        &cfg.resume_text,
         &cfg.job_description,
         cfg.openai_url(),
     ).await?;

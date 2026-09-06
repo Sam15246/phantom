@@ -240,12 +240,12 @@ pub const DOMAIN: &str = r#"
 "#;
 
 /// Returns experience sections relevant to a given mode
+/// Returns experience sections relevant to the given interview mode.
 pub fn experience_for_mode(mode: &str) -> String {
     match mode {
         "backend" | "java" => format!("{}\n{}\n{}", BACKEND_DEV, PROJECTS, DOMAIN),
         "qa" => format!("{}\n{}\n{}", QA_SDET, PROJECTS, DOMAIN),
-        "project-deep-dive" => format!("{}\n{}\n{}\n{}", BACKEND_DEV, QA_SDET, PROJECTS, DOMAIN),
-        "ai-interview" => format!("{}\n{}\n{}\n{}", BACKEND_DEV, QA_SDET, PROJECTS, DOMAIN),
+        "project-deep-dive" | "ai-interview" => format!("{}\n{}\n{}\n{}", BACKEND_DEV, QA_SDET, PROJECTS, DOMAIN),
         "behavioral" => format!("{}\n{}", PROJECTS, DOMAIN),
         "system-design" | "lld" => format!("{}\n{}", BACKEND_DEV, PROJECTS),
         "python" => format!("{}\n{}", PROJECTS, DOMAIN),
