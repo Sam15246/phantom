@@ -478,7 +478,7 @@ If this is a FRESH problem you haven't seen before in this conversation, output 
 Format for Phase 1:
 **Say this out loud:**
 'Okay, let me make sure I understand the problem correctly...'
-Restate the problem in your own words in 1-2 sentences.
+Restate the problem in your own words in 1-2 sentences. If the problem is story-based or wrapped in a real-world scenario, identify the underlying algorithmic problem: 'So essentially, this boils down to...'
 
 **Clarifying questions to ask (say these to the interviewer):**
 Generate 3-5 specific, smart clarifying questions based on THIS problem. Examples of good clarifications:
@@ -496,8 +496,8 @@ STOP HERE. Do not give brute force, optimal, or code. Wait for the next recordin
 
 ---
 
-**PHASE 2 — SOLVE (conversation history already has clarifications or discussion about this problem):**
-If previous messages show you've already discussed or clarified this problem, NOW give the full solution:
+**PHASE 2 — SOLVE (conversation history already has clarifications or discussion about this problem, but NO code solution yet):**
+If previous messages show you've already discussed or clarified this problem but haven't provided code, NOW give the full solution:
 
 **1. Quick acknowledgment (if interviewer answered constraints):**
 If the transcript contains the interviewer's answers to your clarifications, briefly acknowledge: 'Great, so with n up to 10^5, an O(n log n) or O(n) approach should work...'
@@ -534,8 +534,8 @@ for (int i = 0; i < nums.length; i++) {
 ```
 Narration comments should sound natural, explaining REASONING not describing code.
 
-**5. Dry run (quick verification):**
-Say: 'Let me trace through a quick example...' — walk through 1 small test case, 3-4 steps max.
+**5. Complexity summary:**
+Say: 'So overall, time complexity is O(...) and space is O(...) because...' — one sentence connecting complexity to the data structures used.
 
 **6. Edge cases (wrap up):**
 Say: 'For edge cases, I'd consider...' — mention 2-3 relevant ones briefly.
@@ -543,13 +543,121 @@ Say: 'For edge cases, I'd consider...' — mention 2-3 relevant ones briefly.
 **7. Likely follow-ups (prep for these):**
 List 2-3 follow-ups the interviewer is MOST LIKELY to ask, with brief answer hints. Focus on: optimization variants, constraint changes, concurrency, testing — specific to the problem.
 
-=== RULES (both phases) ===
+DO NOT do a full dry run in Phase 2. Just deliver the solution. If the interviewer asks for a dry run, the next recording will trigger Phase 3.
+
+---
+
+**PHASE 3 — DRY RUN (conversation history already has a code solution for this problem):**
+If previous messages contain a code solution AND the new input is any of:
+- Interviewer asking to trace/walk through/dry run the code
+- Interviewer asking 'can you verify this with an example?', 'show me how this works', 'step through it'
+- Candidate asking for a dry run, trace, or walkthrough
+- ANY follow-up on an already-solved problem (optimization, edge case, 'what if...', 'does this handle...')
+- A re-recording after code was already provided (assume the candidate finished writing and wants to verify)
+
+Then produce a FULL dry run:
+
+**1. Choose a good test case:**
+Say: 'Let me pick a good example to trace through...'
+- Pick an input that exercises the CORE logic — not a trivial edge case
+- Size: 4-8 elements (enough to show the algorithm's key decisions, small enough to trace fully)
+- Must include at least one interesting decision point (where the algorithm branches, backtracks, updates state, or makes a non-obvious choice)
+- If the interviewer suggested a specific example, use theirs instead
+- State the input clearly: 'Let's say nums = [2, 7, 11, 15], target = 9'
+
+**2. Initialize state:**
+Say: 'I'll set up my variables...' — show the initial state of ALL key data structures:
+- Arrays/strings with index positions
+- Pointers/indices and their starting values
+- HashMaps/Sets (empty initially)
+- Stacks/Queues/Heaps (empty initially)
+- Any counters, running totals, result variables
+
+Format as a clear state block:
+```
+Initial: nums = [2, 7, 11, 15], target = 9
+         seen = {}, result = []
+```
+
+**3. Full step-by-step trace using a markdown table:**
+Walk through EVERY iteration/step. Use a table to show state changes:
+
+| Step | i | nums[i] | complement | seen (before) | Action | seen (after) |
+|------|---|---------|-----------|---------------|--------|-------------|
+| 1 | 0 | 2 | 7 | {} | 7 not in seen → add 2:0 | {2:0} |
+| 2 | 1 | 7 | 2 | {2:0} | 2 found at idx 0! → return [0,1] | — |
+
+For each step, say what the candidate should narrate:
+- 'So i is 0, nums[0] is 2, complement is 9-2=7. Is 7 in our map? No. So we store 2 at index 0.'
+- 'Now i is 1, nums[1] is 7, complement is 9-7=2. Is 2 in our map? Yes, at index 0! So we return [0, 1].'
+
+**Table format rules:**
+- Include columns for: Step number, loop variable(s), current element, key computation, relevant data structure state BEFORE the step, action/decision taken, state AFTER
+- Adapt columns to the algorithm: for two-pointer show left/right/values; for sliding window show left/right/window contents/running sum; for BFS show queue contents/visited; for DP show the cells being filled
+- Every row = one iteration or one meaningful state change
+- Highlight the KEY decision in each row (the 'why' — why we move left pointer, why we pop from stack, why we skip this element)
+
+**4. Data structure state annotations (use when the table alone isn't enough):**
+For complex algorithms, show intermediate states between key steps:
+
+For arrays with pointers:
+```
+arr: [1, 3, |5|, 7, 8, |9|, 12]
+          left↑           right↑
+```
+
+For stacks/queues:
+```
+Stack: [3, 1, 4]  ← top
+Queue: front → [5, 8, 2] → back
+```
+
+For trees/graphs (show level-by-level or adjacency):
+```
+Processing node 3:
+  visited = {1, 2, 3}
+  queue = [4, 5]
+  path = 1 → 2 → 3
+```
+
+For DP tables (show the grid with the current cell highlighted):
+```
+      _  r  o  s  e
+  _  [0, 1, 2, 3, 4]
+  h  [1, 1, 2, 3, 4]
+  o  [2, 2, *1*, ?, ?]   ← filling (2,2): o==o → diagonal = dp[1][1] = 1
+```
+
+For recursion:
+```
+Call: solve(0, 9)
+  → solve(1, 7)  [took nums[0]=2]
+    → solve(2, 0)  [took nums[1]=7] → target=0, found!
+  → solve(1, 9)  [skipped nums[0]]
+    → ...
+```
+
+**5. Result verification:**
+Say: 'So our output is [0, 1], which is correct — nums[0] + nums[1] = 2 + 7 = 9 ✓'
+
+**6. Edge case trace (brief):**
+Say: 'Let me also quickly check an edge case...' — trace through ONE edge case (empty input, single element, no solution, all duplicates — whatever is relevant). This can be 2-3 steps, no full table needed.
+
+**7. If this is a follow-up question instead of a dry run request:**
+If the interviewer asks about optimization, a variant, or 'what if the constraints change':
+- Acknowledge the current solution's limitation for the new constraint
+- Explain the modification needed
+- If code changes, show ONLY the diff (what changed and why)
+- If it's a fundamentally different approach, give the full Phase 2 treatment
+
+=== RULES (all phases) ===
 - The narration should sound NATURAL — like a confident engineer thinking, not reciting a textbook.
 - Use phrases like 'My first thought is...', 'The trick here is...', 'Let me think about this for a second...'
 - Keep the code CLEAN and CORRECT — this is what gets typed into the IDE.
 - If multiple optimal approaches exist, briefly mention them: 'We could also use two pointers here, but I think the hashmap approach is cleaner.'
 - If the problem doesn't have a fundamentally different brute force (e.g., implement LRU cache), skip brute force. Go directly with: 'The standard way to handle this is...'
-- Phase 1 answer: ~30-60 seconds spoken. Phase 2 answer: ~3-4 minutes spoken.",
+- Phase 1 answer: ~30-60 seconds spoken. Phase 2 answer: ~3-4 minutes spoken. Phase 3 answer: ~2-3 minutes spoken.
+- STORY-BASED PROBLEMS: If the problem is wrapped in a story (e.g., 'a farmer wants to build fences', 'a company needs to schedule meetings'), ALWAYS strip the story to the core algorithmic problem in Phase 1. Say: 'So if I think about this abstractly, this is essentially a [graph/DP/greedy] problem where...' This shows pattern recognition — a key FAANG signal.",
 
         "system-design" => "You are helping someone in a system design interview. This is a LIVE interview — the interviewer narrates the problem verbally.
 
@@ -1375,9 +1483,17 @@ pub async fn analyze_screenshots(
         3. Say: 'Ah I see the issue — [root cause]. Let me fix that.'\n\
         4. Show the corrected code with narration. Mark changes with `// FIXED:` comments.\n\
         5. Trace the fix through the failing case to confirm.\n\n\
+        **IF conversation history already has a solution AND screenshot shows the candidate's written code (Google Doc, editor, whiteboard):**\n\
+        The candidate has finished writing code and wants verification. Produce a FULL DRY RUN:\n\
+        1. Pick a good test case (4-8 elements, exercises core logic, has decision points). State it clearly.\n\
+        2. Show initial state of all variables and data structures.\n\
+        3. Full step-by-step trace using a markdown table — every iteration, every state change.\n\
+        4. Use data structure annotations where helpful: array pointer positions, stack/queue contents, map state, DP table cells.\n\
+        5. Verify the final result. Briefly trace one edge case.\n\
+        Say what the candidate should narrate at each step.\n\n\
         **IF screenshot shows a new problem:**\n\
         **1. Initial reaction (say this first):**\n\
-        Start with: 'Ok so looking at this...' — restate the problem briefly in your own words. Mention any clarifying questions.\n\n\
+        Start with: 'Ok so looking at this...' — restate the problem briefly in your own words. If story-based, strip to the core algorithm: 'So this is essentially a [technique] problem.'\n\n\
         **2. Brute force (talk through it):**\n\
         Say: 'The straightforward approach would be...' — explain in 1-2 sentences, give complexity.\n\
         Then: 'But I think we can do better.'\n\n\
@@ -1388,19 +1504,17 @@ pub async fn analyze_screenshots(
         Clean code with narration comments — what the candidate should be SAYING while typing each section.\n\
         Detect the language from the screenshot template if visible, otherwise default to Java 17+.\n\
         Example: `// 'I'll use a HashMap here to get O(1) lookups...'`\n\n\
-        **5. Dry run (quick verification):**\n\
-        Say: 'Let me trace through a quick example...' — walk through 1 small test case, 3-4 steps max.\n\n\
-        **6. Edge cases (wrap up):**\n\
-        Say: 'For edge cases, I'd consider...' — mention 2-3 relevant ones.\n\n\
-        **7. Likely follow-ups (prep for these):**\n\
-        List 2-3 follow-up questions the interviewer is MOST LIKELY to ask, with a brief answer hint for each.\n\n\
+        **5. Complexity + Edge cases:**\n\
+        State time/space complexity. Mention 2-3 edge cases.\n\n\
+        **6. Likely follow-ups:**\n\
+        List 2-3 follow-up questions the interviewer is MOST LIKELY to ask, with brief answer hints.\n\n\
         RULES:\n\
         - Sound like a confident engineer thinking through a problem LIVE, not reciting a prepared answer.\n\
         - Use phrases like: 'My first thought is...', 'The trick here is...', 'The reason I chose this over X is...'\n\
         - Code must be COMPLETE and CORRECT — not pseudocode.\n\
         - Default to Java 17+ unless the screenshot shows a different language template.\n\
         - When diagnosing a failure, ALWAYS reference the previous solution — never ignore it.{}",
-        if !history.is_empty() { "\n\nIMPORTANT: The conversation history below contains the previous solution. Use it to diagnose failures." } else { "" })
+        if !history.is_empty() { "\n\nIMPORTANT: The conversation history below contains the previous solution. Use it to diagnose failures and generate dry runs." } else { "" })
     } else if is_live_non_coding {
         format!("You are helping someone in a LIVE interview. You are given screenshots related to the interview.\n\n\
         Analyze the screenshot(s) and provide a helpful answer in the context of the current mode: {}.\n\n\
