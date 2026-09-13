@@ -16,6 +16,7 @@ pub struct ConversationHistory {
     pub last_mode: std::sync::Mutex<String>,
     pub locked_mode: std::sync::Mutex<Option<String>>,
     pub pipeline_running: std::sync::atomic::AtomicBool,
+    pub pipeline_cancel: std::sync::atomic::AtomicBool,
 }
 
 impl ConversationHistory {
@@ -25,6 +26,7 @@ impl ConversationHistory {
             last_mode: std::sync::Mutex::new("general".to_string()),
             locked_mode: std::sync::Mutex::new(None),
             pipeline_running: std::sync::atomic::AtomicBool::new(false),
+            pipeline_cancel: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -42,6 +44,8 @@ impl PipelineGuard {
     fn try_acquire(app: &tauri::AppHandle) -> Option<Self> {
         use tauri::Manager;
         let history = app.state::<ConversationHistory>();
+        // Clear any stale cancel from a previous run
+        history.pipeline_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
         history
             .pipeline_running
             .compare_exchange(
@@ -77,14 +81,14 @@ impl ClickThroughState {
     }
 }
 
-pub struct NightModeState {
-    pub enabled: std::sync::atomic::AtomicBool,
+pub struct ThemeState {
+    pub index: std::sync::atomic::AtomicUsize,
 }
 
-impl NightModeState {
+impl ThemeState {
     pub fn new() -> Self {
         Self {
-            enabled: std::sync::atomic::AtomicBool::new(false),
+            index: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 }
@@ -122,6 +126,13 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
     }
 
     let http = app.state::<api::SharedHttpClient>();
+    let history_state = app.state::<ConversationHistory>();
+
+    // Cancel checkpoint — before spending any tokens
+    if history_state.pipeline_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        let _ = app.emit("pipeline:cancelled", ());
+        return Ok(());
+    }
 
     // Step 1: Transcribe
     let _ = app.emit("pipeline:status", "Transcribing...");
@@ -133,8 +144,13 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         return Err("Empty transcript".into());
     }
 
+    // Cancel checkpoint — before extraction
+    if history_state.pipeline_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        let _ = app.emit("pipeline:cancelled", ());
+        return Ok(());
+    }
+
     // Step 2: Extract question + detect mode (skip extraction if mode is locked)
-    let history_state = app.state::<ConversationHistory>();
     let locked = history_state.locked_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
     let (question, effective_mode, context) = if let Some(ref locked_mode) = locked {
@@ -188,6 +204,12 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         }
     };
 
+    // Cancel checkpoint — before the most expensive API call
+    if history_state.pipeline_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        let _ = app.emit("pipeline:cancelled", ());
+        return Ok(());
+    }
+
     // Step 3: Generate answer (streaming)
     let _ = app.emit("pipeline:status", "Generating answer...");
     let answer = api::generate_answer_streaming(
@@ -200,6 +222,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
         &hist,
         &cfg.job_description,
         cfg.openai_url(),
+        &history_state.pipeline_cancel,
     ).await?;
 
     // Store in conversation history
@@ -263,6 +286,7 @@ async fn ask_followup(
         &hist,
         &cfg.job_description,
         cfg.openai_url(),
+        &history_state.pipeline_cancel,
     ).await;
 
     // Only add to history if generation succeeded
@@ -374,6 +398,8 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
 
     // Use streaming answer generation (reuse existing infrastructure)
     let http = app.state::<api::SharedHttpClient>();
+    // Summary is background work — not cancellable
+    let no_cancel = std::sync::atomic::AtomicBool::new(false);
     api::generate_answer_streaming(
         &app,
         &http.client,
@@ -384,6 +410,7 @@ async fn generate_summary(app: tauri::AppHandle) -> Result<(), String> {
         &[],
         &cfg.job_description,
         cfg.openai_url(),
+        &no_cancel,
     ).await?;
 
     Ok(())
@@ -397,7 +424,7 @@ fn main() {
         .manage(audio::RecordingStore::new())
         .manage(ConversationHistory::new())
         .manage(ClickThroughState::new())
-        .manage(NightModeState::new())
+        .manage(ThemeState::new())
         .manage(screenshot::ScreenshotQueue::new())
         .manage(ProctorState::new())
         .manage(api::SharedHttpClient::new())
@@ -634,18 +661,18 @@ fn main() {
                 });
             }
 
-            // Handle toggle night mode (Ctrl+Shift+Z)
+            // Handle theme cycle (Ctrl+Shift+Z)
             let nm_handle = handle.clone();
             app.listen("hotkey:toggle-night-mode", move |_| {
                 use tauri::Manager;
                 let _ = nm_handle.emit("hotkey:toggle-night-mode-ui", ());
-                // Toggle backend state mirror and update tray label
-                let nm_state = nm_handle.state::<NightModeState>();
-                let was = nm_state.enabled.load(std::sync::atomic::Ordering::SeqCst);
-                nm_state.enabled.store(!was, std::sync::atomic::Ordering::SeqCst);
+                let theme_state = nm_handle.state::<ThemeState>();
+                let labels = ["Phantom", "Editor Dark", "Editor Light", "Glass", "Night"];
+                let old = theme_state.index.load(std::sync::atomic::Ordering::SeqCst);
+                let new_idx = (old + 1) % labels.len();
+                theme_state.index.store(new_idx, std::sync::atomic::Ordering::SeqCst);
                 if let Some(tray_state) = nm_handle.try_state::<TrayMenuState>() {
-                    let label = if !was { "Night Mode: ON" } else { "Night Mode: OFF" };
-                    let _ = tray_state.night_mode_item.set_text(label);
+                    let _ = tray_state.night_mode_item.set_text(&format!("Theme: {}", labels[new_idx]));
                 }
             });
 
@@ -805,6 +832,7 @@ fn main() {
                 history.messages.lock().unwrap_or_else(|e| e.into_inner()).clear();
                 *history.last_mode.lock().unwrap_or_else(|e| e.into_inner()) = "general".to_string();
                 *history.locked_mode.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                history.pipeline_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
                 let queue = clear_handle.state::<screenshot::ScreenshotQueue>();
                 queue.queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
                 let _ = clear_handle.emit("mode:locked", "auto");
@@ -872,6 +900,34 @@ fn main() {
                 let queue = ss_clear_handle.state::<screenshot::ScreenshotQueue>();
                 queue.queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
                 let _ = ss_clear_handle.emit("screenshot:cleared", ());
+            });
+
+            // Handle cancel/discard (Ctrl+Shift+D)
+            let cancel_handle = handle.clone();
+            app.listen("hotkey:cancel-pipeline", move |_| {
+                use tauri::Manager;
+                let engine = cancel_handle.state::<audio::AudioEngine>();
+
+                // Case 1: Recording is active — discard it
+                if engine.is_recording.load(std::sync::atomic::Ordering::SeqCst) {
+                    let _ = engine.stop_recording(); // discard WAV bytes
+                    let _ = cancel_handle.emit("recording:discarded", ());
+                    if let Some(tray_state) = cancel_handle.try_state::<TrayMenuState>() {
+                        let _ = tray_state.record_item.set_text("Start Recording");
+                    }
+                    return;
+                }
+
+                // Case 2: Pipeline is running — signal cancellation
+                let history = cancel_handle.state::<ConversationHistory>();
+                if history.pipeline_running.load(std::sync::atomic::Ordering::SeqCst) {
+                    history.pipeline_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = cancel_handle.emit("pipeline:cancelling", ());
+                    return;
+                }
+
+                // Case 3: Nothing to cancel
+                let _ = cancel_handle.emit("pipeline:nothing-to-cancel", ());
             });
 
             // Handle screenshot capture (Ctrl+Shift+F7)
@@ -982,6 +1038,7 @@ fn main() {
                             &current_mode,
                             &history_snapshot,
                             cfg.openai_url(),
+                            &history_guard.pipeline_cancel,
                         )
                         .await
                         {
@@ -1054,7 +1111,7 @@ fn main() {
                 let copy_code_item = MenuItem::with_id(app, "copy-code", "Copy Code Blocks", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-                let night_mode_item = MenuItem::with_id(app, "night-mode", "Night Mode: OFF", true, None::<&str>)
+                let night_mode_item = MenuItem::with_id(app, "night-mode", "Theme: Phantom", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
                 let click_through_item = MenuItem::with_id(app, "click-through", "Click-Through: ON", true, None::<&str>)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;

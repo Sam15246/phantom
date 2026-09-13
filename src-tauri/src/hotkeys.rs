@@ -14,6 +14,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, S
 /// Safe keys: F, H, X, Z, numbers, arrows, brackets, Backspace
 /// NOT safe (verified): G (find prev), K (Edge dup tab), O (bookmark mgr)
 const HOTKEY_EVENTS: &[(&str, &str)] = &[
+    ("Ctrl+Shift+D",       "hotkey:cancel-pipeline"),      // Cancel/discard recording
     ("Ctrl+Shift+F6",      "hotkey:toggle-recording"),     // Record/stop
     ("Ctrl+Shift+F7",      "hotkey:screenshot"),            // Grab screenshot
     ("Ctrl+Shift+F",       "hotkey:analyze"),              // Find/analyze screenshots

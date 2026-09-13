@@ -9,7 +9,75 @@
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
 }
 
-body.night-mode {
+/* Theme: Editor Dark — matches VS Code dark / LeetCode dark */
+body.theme-editor-dark {
+  --bg-primary: rgba(30, 30, 30, 0.92);
+  --bg-secondary: rgba(37, 37, 38, 0.95);
+  --text-primary: #d4d4d4;
+  --text-secondary: #808080;
+  --text-accent: #569cd6;
+  --border-color: rgba(255, 255, 255, 0.05);
+  --code-bg: rgba(0, 0, 0, 0.25);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+}
+
+/* Theme: Editor Light — matches VS Code light / Google Docs */
+body.theme-editor-light {
+  --bg-primary: rgba(255, 255, 255, 0.92);
+  --bg-secondary: rgba(243, 243, 243, 0.95);
+  --text-primary: #1e1e1e;
+  --text-secondary: #6a6a6a;
+  --text-accent: #0451a5;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --code-bg: rgba(0, 0, 0, 0.04);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+}
+body.theme-editor-light .hljs-keyword { color: #0000ff; }
+body.theme-editor-light .hljs-string { color: #a31515; }
+body.theme-editor-light .hljs-number { color: #098658; }
+body.theme-editor-light .hljs-comment { color: #008000; }
+body.theme-editor-light .hljs-function,
+body.theme-editor-light .hljs-title { color: #795e26; }
+body.theme-editor-light .hljs-built_in,
+body.theme-editor-light .hljs-type { color: #267f99; }
+body.theme-editor-light .hljs-params,
+body.theme-editor-light .hljs-attr { color: #001080; }
+body.theme-editor-light .hljs-literal { color: #0000ff; }
+body.theme-editor-light #answer-box pre { border-left-color: #0451a5; }
+body.theme-editor-light #quick-actions button {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #6a6a6a;
+}
+body.theme-editor-light #quick-actions button:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #1e1e1e;
+}
+body.theme-editor-light .code-copy-btn {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #6a6a6a;
+}
+body.theme-editor-light #follow-up-input {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #1e1e1e;
+}
+
+/* Theme: Glass — near-transparent, maximum stealth */
+body.theme-glass {
+  --bg-primary: rgba(0, 0, 0, 0.15);
+  --bg-secondary: rgba(0, 0, 0, 0.20);
+  --text-primary: rgba(255, 255, 255, 0.65);
+  --text-secondary: rgba(255, 255, 255, 0.35);
+  --text-accent: rgba(255, 255, 255, 0.50);
+  --border-color: rgba(255, 255, 255, 0.03);
+  --code-bg: rgba(0, 0, 0, 0.10);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.06);
+}
+
+/* Theme: Night — reduced contrast for low-light */
+body.theme-night {
   --bg-primary: rgba(20, 19, 17, 0.95);
   --bg-secondary: rgba(28, 27, 25, 0.97);
   --text-primary: #908e85;

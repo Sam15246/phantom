@@ -2,16 +2,30 @@
 // Tauri 2 exposes APIs via window.__TAURI__ when withGlobalTauri is true
 
 let isClickThrough = true;
-let isNightMode = false;
 let opacity = 0.92;
 let isCompactMode = false;
 let fontSizeLevel = 1; // 0=S, 1=M (default), 2=L
 let autoScrollTimer = null;
 
-// --- Night Mode ---
-function toggleNightMode() {
-  isNightMode = !isNightMode;
-  document.body.classList.toggle('night-mode', isNightMode);
+// --- Theme Cycling ---
+const THEMES = ['', 'theme-editor-dark', 'theme-editor-light', 'theme-glass', 'theme-night'];
+const THEME_LABELS = ['Phantom', 'Editor Dark', 'Editor Light', 'Glass', 'Night'];
+let themeIndex = 0;
+
+function cycleTheme() {
+  if (THEMES[themeIndex]) {
+    document.body.classList.remove(THEMES[themeIndex]);
+  }
+  themeIndex = (themeIndex + 1) % THEMES.length;
+  if (THEMES[themeIndex]) {
+    document.body.classList.add(THEMES[themeIndex]);
+  }
+  const statusEl = document.getElementById('status-indicator');
+  const prev = statusEl.textContent;
+  const prevColor = statusEl.style.color;
+  statusEl.textContent = '\u25cf ' + THEME_LABELS[themeIndex];
+  statusEl.style.color = '#6a8a5a';
+  setTimeout(() => { statusEl.textContent = prev; statusEl.style.color = prevColor; }, 2000);
 }
 
 // --- Click-Through Toggle ---
@@ -297,7 +311,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const listen = window.__TAURI__.event.listen;
 
   // Hotkey events (backend-forwarded UI events for click-through and night mode)
-  await listen('hotkey:toggle-night-mode-ui', toggleNightMode);
+  await listen('hotkey:toggle-night-mode-ui', cycleTheme);
   await listen('hotkey:toggle-click-through-ui', (event) => {
     // Backend already toggled click-through; just update UI
     isClickThrough = event.payload;
@@ -515,6 +529,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     const msg = (window.DOMPurify ? DOMPurify.sanitize(event.payload) : event.payload);
     answerBox.innerHTML = '<p class="pipeline-status" style="color: #c25550;">Error: ' + msg + '</p>';
     resetStatus();
+  });
+
+  // Cancel/discard events
+  await listen('recording:discarded', () => {
+    isRecording = false;
+    stopTimer();
+    const statusEl = document.getElementById('status-indicator');
+    statusEl.textContent = '\u25cf Discarded';
+    statusEl.style.color = '#c49a3a';
+    setTimeout(() => { statusEl.textContent = '\u25cf Ready'; statusEl.style.color = ''; }, 2000);
+  });
+
+  await listen('pipeline:cancelling', () => {
+    const statusEl = document.getElementById('status-indicator');
+    statusEl.textContent = '\u25cf Cancelling...';
+    statusEl.style.color = '#c49a3a';
+  });
+
+  await listen('pipeline:cancelled', () => {
+    const answerBox = document.getElementById('answer-box');
+    answerBox.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'placeholder-text';
+    p.textContent = 'Cancelled. Press Ctrl+Shift+F6 to start recording';
+    answerBox.appendChild(p);
+    document.getElementById('quick-actions').style.display = 'none';
+    document.getElementById('follow-up').style.display = 'none';
+    currentAnswer = '';
+    resetStatus();
+  });
+
+  await listen('pipeline:nothing-to-cancel', () => {
+    const statusEl = document.getElementById('status-indicator');
+    const prev = statusEl.textContent;
+    const prevColor = statusEl.style.color;
+    statusEl.textContent = '\u25cf Nothing to cancel';
+    statusEl.style.color = '#8a8880';
+    setTimeout(() => { statusEl.textContent = prev; statusEl.style.color = prevColor; }, 1500);
   });
 
   // Screenshot events

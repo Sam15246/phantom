@@ -1361,6 +1361,7 @@ pub async fn generate_answer_streaming(
     history: &[ChatMessage],
     job_description: &str,
     base_url: &str,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<String, String> {
     let model = select_model(mode);
     let system_prompt = build_system_prompt(mode, job_description);
@@ -1417,6 +1418,11 @@ pub async fn generate_answer_streaming(
     let mut buffer = String::new();
 
     while let Some(chunk_result) = stream.next().await {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = app.emit("pipeline:cancelled", ());
+            return Err("Cancelled".into());
+        }
+
         let chunk = chunk_result.map_err(|e| format!("Stream error: {e}"))?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
@@ -1460,6 +1466,7 @@ pub async fn analyze_screenshots(
     current_mode: &str,
     history: &[ChatMessage],
     base_url: &str,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<String, String> {
 
     // Three screenshot prompt categories:
@@ -1634,6 +1641,11 @@ pub async fn analyze_screenshots(
     let mut buffer = String::new();
 
     while let Some(chunk_result) = stream.next().await {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = app.emit("pipeline:cancelled", ());
+            return Err("Cancelled".into());
+        }
+
         let chunk = chunk_result.map_err(|e| format!("Stream error: {e}"))?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
