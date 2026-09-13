@@ -321,36 +321,7 @@ html, body {
   border-color: rgba(200, 184, 138, 0.3);
 }
 
-/* --- Debug Header (transcript + extraction) --- */
-.debug-header {
-  font-size: 11px;
-  color: var(--text-secondary);
-  padding: 6px 10px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  line-height: 1.5;
-  opacity: 0.75;
-}
-.debug-label {
-  color: var(--text-accent);
-  font-weight: 600;
-}
-.debug-mode {
-  color: var(--text-accent);
-  font-size: 10px;
-}
 
-/* --- Transcript Preview (FEAT-2) --- */
-blockquote.transcript-preview {
-  border-left: 2px solid var(--text-accent);
-  margin: 8px 0;
-  padding: 6px 12px;
-  color: var(--text-secondary);
-  font-style: italic;
-  font-size: 12px;
-  background: rgba(200, 184, 138, 0.05);
-  border-radius: 0 4px 4px 0;
-}
 
 /* --- Follow-up hint (UX-1) --- */
 #follow-up-hint {
@@ -459,9 +430,6 @@ blockquote.transcript-preview {
 body.compact-mode #answer-box p {
   display: none;
 }
-body.compact-mode #answer-box .debug-header {
-  display: block; /* keep debug header visible */
-}
 body.compact-mode #answer-box ul,
 body.compact-mode #answer-box ol {
   padding-left: 14px;
@@ -481,9 +449,6 @@ body.compact-mode #answer-box pre {
   padding: 6px 8px;
   font-size: 12px;
   line-height: 1.35;
-}
-body.compact-mode #answer-box blockquote.transcript-preview {
-  display: block;
 }
 
 /* --- Font Size Variants (Ctrl+Shift+K) --- */

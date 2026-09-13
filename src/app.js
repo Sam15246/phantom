@@ -206,15 +206,7 @@ async function renderMermaidBlocks() {
 
 function showAnswer(html) {
   const answerBox = document.getElementById('answer-box');
-  // Show transcript + extraction debug header above the answer
-  let debugHeader = '';
-  if (window._lastTranscript || window._lastExtraction) {
-    const t = window._lastTranscript || '';
-    const q = window._lastExtraction ? window._lastExtraction.question : '';
-    const m = window._lastExtraction ? window._lastExtraction.mode : '';
-    debugHeader = `<div class="debug-header"><span class="debug-label">Heard:</span> "${t}"<br><span class="debug-label">Extracted:</span> "${q}" <span class="debug-mode">[${m}]</span></div>`;
-  }
-  answerBox.innerHTML = debugHeader + html;
+  answerBox.innerHTML = html;
   highlightCode();
   renderMermaidBlocks();
   document.getElementById('quick-actions').style.display = 'flex';
@@ -491,12 +483,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await listen('pipeline:transcript', (event) => {
-    const transcript = window.DOMPurify
-      ? DOMPurify.sanitize(event.payload)
-      : event.payload;
-    window._lastTranscript = transcript;
+    window._lastTranscript = event.payload || '';
     const answerBox = document.getElementById('answer-box');
-    answerBox.innerHTML = `<blockquote class="transcript-preview">"${transcript}"</blockquote>`;
+    answerBox.innerHTML = '<p class="pipeline-status">Analyzing...</p>';
   });
 
   await listen('pipeline:extraction', (event) => {
