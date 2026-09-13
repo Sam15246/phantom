@@ -335,6 +335,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // On press: fire action once + start interval. On release: stop interval.
   const holdTimers = {};
 
+  function clearAllHoldTimers() {
+    for (const key of Object.keys(holdTimers)) {
+      clearInterval(holdTimers[key]);
+      delete holdTimers[key];
+    }
+  }
+
+  // Safety net: clear all hold timers on blur (missed key-up events)
+  window.addEventListener('blur', clearAllHoldTimers);
+
   async function holdable(eventName, action, intervalMs = 70) {
     await listen(eventName, () => {
       action(); // fire immediately
@@ -426,7 +436,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Log hotkey registration errors visibly
   await listen('hotkey:registration-error', (event) => {
     const answerBox = document.getElementById('answer-box');
-    answerBox.innerHTML = '<p style="color:#c25550;font-size:12px;">Hotkey registration failed: ' + event.payload + '</p>';
+    answerBox.textContent = '';
+    const p = document.createElement('p');
+    p.style.cssText = 'color:#c25550;font-size:12px;';
+    p.textContent = 'Hotkey registration failed: ' + event.payload + '. Use tray menu as fallback.';
+    answerBox.appendChild(p);
   });
 
   // Recording events from backend
@@ -676,13 +690,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-copy').addEventListener('click', copyAnswer);
   document.getElementById('btn-copy-code').addEventListener('click', copyCode);
 
-  // Follow-up question
+  // Follow-up question (with debounce to prevent spam)
   const followUpInput = document.getElementById('follow-up-input');
+  let followUpPending = false;
   if (followUpInput) {
     followUpInput.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter' && followUpInput.value.trim()) {
+      if (e.key === 'Enter' && followUpInput.value.trim() && !followUpPending) {
         const question = followUpInput.value.trim();
         followUpInput.value = '';
+        followUpPending = true;
+        followUpInput.disabled = true;
         currentAnswer = '';
         document.getElementById('answer-box').innerHTML =
           '<p class="pipeline-status">Thinking...</p>';
@@ -693,6 +710,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           const msg = (window.DOMPurify ? DOMPurify.sanitize(String(err)) : String(err));
           document.getElementById('answer-box').innerHTML =
             '<p class="pipeline-status" style="color: #c25550;">Error: ' + msg + '</p>';
+        } finally {
+          followUpPending = false;
+          followUpInput.disabled = false;
         }
       }
     });

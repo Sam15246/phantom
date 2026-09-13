@@ -12,6 +12,7 @@ use tauri::State;
 
 pub struct AudioEngine {
     pub is_recording: Arc<AtomicBool>,
+    pub device_lost: Arc<AtomicBool>,
     system_samples: Arc<Mutex<Vec<f32>>>,
     mic_samples: Arc<Mutex<Vec<f32>>>,
     sample_rate: Arc<Mutex<u32>>,
@@ -39,6 +40,7 @@ impl AudioEngine {
     pub fn new() -> Self {
         Self {
             is_recording: Arc::new(AtomicBool::new(false)),
+            device_lost: Arc::new(AtomicBool::new(false)),
             system_samples: Arc::new(Mutex::new(Vec::new())),
             mic_samples: Arc::new(Mutex::new(Vec::new())),
             sample_rate: Arc::new(Mutex::new(44100)),
@@ -52,6 +54,7 @@ impl AudioEngine {
     /// Returns Ok(None) on full success, Ok(Some(warning)) on partial, Err on total failure.
     pub fn start_recording(&self, audio_source: &str) -> Result<Option<String>, String> {
         // Clear previous data
+        self.device_lost.store(false, Ordering::SeqCst);
         self.system_samples.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.mic_samples.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
@@ -92,6 +95,7 @@ impl AudioEngine {
                                         mic_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(data);
                                     }
                                 },
+                                Arc::clone(&self.device_lost),
                             );
                             match stream {
                                 Err(e) => { mic_fail_reason = Some(format!("stream build error: {e}")); mic_rate = None; None }
@@ -130,6 +134,7 @@ impl AudioEngine {
                                         sys_buf.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(data);
                                     }
                                 },
+                                Arc::clone(&self.device_lost),
                             );
                             match stream {
                                 Err(e) => { sys_fail_reason = Some(format!("stream build error: {e}")); sys_rate = None; None }
@@ -257,17 +262,22 @@ fn build_input_stream_f32(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     callback: impl FnMut(&[f32]) + Send + 'static,
+    device_lost: Arc<AtomicBool>,
 ) -> Result<Box<dyn StreamHandle>, String> {
     let cb = Arc::new(Mutex::new(callback));
 
     // Try F32 first
     let cb_f32 = Arc::clone(&cb);
+    let lost_f32 = Arc::clone(&device_lost);
     let stream_f32 = device.build_input_stream(
         config,
         move |data: &[f32], _| {
             (cb_f32.lock().unwrap_or_else(|e| e.into_inner()))(data);
         },
-        |_e| { /* stream error — silent in release */ },
+        move |e| {
+            eprintln!("[phantom] Audio stream error: {e}");
+            lost_f32.store(true, Ordering::SeqCst);
+        },
         None,
     );
 
@@ -278,13 +288,17 @@ fn build_input_stream_f32(
 
     // Fall back to I16 — convert to f32 inline
     let cb_i16 = Arc::clone(&cb);
+    let lost_i16 = Arc::clone(&device_lost);
     let stream_i16 = device.build_input_stream(
         config,
         move |data: &[i16], _| {
             let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
             (cb_i16.lock().unwrap_or_else(|e| e.into_inner()))(&floats);
         },
-        |_e| { /* stream error — silent in release */ },
+        move |e| {
+            eprintln!("[phantom] Audio stream error (i16): {e}");
+            lost_i16.store(true, Ordering::SeqCst);
+        },
         None,
     );
 

@@ -173,6 +173,11 @@ pub fn toggle_overlay_visibility(app: AppHandle) -> Result<bool, String> {
         window.hide().map_err(|e| format!("Failed to hide: {e}"))?;
     } else {
         window.show().map_err(|e| format!("Failed to show: {e}"))?;
+        // Re-apply click-through state after showing (some WMs reset window styles)
+        if let Some(ct_state) = app.try_state::<crate::ClickThroughState>() {
+            let ct = ct_state.enabled.load(std::sync::atomic::Ordering::SeqCst);
+            let _ = window.set_ignore_cursor_events(ct);
+        }
     }
 
     Ok(!visible)

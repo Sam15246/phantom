@@ -130,9 +130,33 @@ pub fn load_config_internal() -> Result<PhantomConfig, String> {
         return Ok(PhantomConfig::default());
     }
 
-    let encrypted = fs::read(&path).map_err(|e| format!("Read error: {e}"))?;
-    let decrypted = decrypt(&encrypted)?;
-    serde_json::from_slice(&decrypted).map_err(|e| format!("Parse error: {e}"))
+    let encrypted = match fs::read(&path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("[phantom] Config read error: {e} — using defaults");
+            return Ok(PhantomConfig::default());
+        }
+    };
+
+    let decrypted = match decrypt(&encrypted) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[phantom] Config decrypt error: {e} — backing up corrupt file");
+            let backup = path.with_extension("enc.bak");
+            let _ = fs::rename(&path, &backup);
+            return Ok(PhantomConfig::default());
+        }
+    };
+
+    match serde_json::from_slice(&decrypted) {
+        Ok(cfg) => Ok(cfg),
+        Err(e) => {
+            eprintln!("[phantom] Config parse error: {e} — backing up corrupt file");
+            let backup = path.with_extension("enc.bak");
+            let _ = fs::rename(&path, &backup);
+            Ok(PhantomConfig::default())
+        }
+    }
 }
 
 #[tauri::command]
@@ -145,7 +169,10 @@ pub fn save_config(config: PhantomConfig, cache: tauri::State<'_, ConfigCache>) 
     let json = serde_json::to_vec_pretty(&config).map_err(|e| format!("Serialize error: {e}"))?;
     let encrypted = encrypt(&json)?;
     let path = config_path();
-    fs::write(&path, encrypted).map_err(|e| format!("Write error: {e}"))?;
+    // Atomic write: write to temp file first, then rename — prevents corruption on crash
+    let tmp_path = path.with_extension("enc.tmp");
+    fs::write(&tmp_path, &encrypted).map_err(|e| format!("Write error: {e}"))?;
+    fs::rename(&tmp_path, &path).map_err(|e| format!("Rename error: {e}"))?;
     cache.invalidate(&config);
     Ok(())
 }

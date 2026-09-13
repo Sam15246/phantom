@@ -140,7 +140,7 @@ async fn run_pipeline(app: tauri::AppHandle, wav_bytes: Vec<u8>) -> Result<(), S
     let _ = app.emit("pipeline:transcript", &transcript);
 
     if transcript.trim().is_empty() {
-        let _ = app.emit("pipeline:error", "No speech detected");
+        let _ = app.emit("pipeline:error", "No speech detected — check mic input or speak louder");
         return Err("Empty transcript".into());
     }
 
@@ -542,13 +542,13 @@ fn main() {
                 });
             }
 
-            // Periodic proctoring re-scan (every 60s, quick scan — process only)
+            // Periodic proctoring re-scan (every 15s, quick scan — process only)
             {
                 let periodic_handle = handle.clone();
                 std::thread::spawn(move || {
                     use tauri::Manager;
                     loop {
-                        std::thread::sleep(std::time::Duration::from_secs(60));
+                        std::thread::sleep(std::time::Duration::from_secs(15));
                         let report = proctor_detect::quick_scan();
 
                         // Only emit if something changed (vendors detected or cleared)
@@ -765,8 +765,15 @@ fn main() {
                     let store = rec_handle.state::<audio::RecordingStore>();
 
                     if engine.is_recording.load(std::sync::atomic::Ordering::SeqCst) {
+                        let device_was_lost = engine.device_lost.load(std::sync::atomic::Ordering::SeqCst);
                         let wav_bytes = engine.stop_recording();
                         let byte_count = wav_bytes.len();
+
+                        // Warn if audio device disconnected during recording
+                        if device_was_lost {
+                            let _ = rec_handle.emit("recording:warning",
+                                "Audio device disconnected during recording — quality may be degraded");
+                        }
                         *store.data.lock().unwrap_or_else(|e| e.into_inner()) = Some(wav_bytes.clone());
                         let _ = rec_handle.emit("recording:stopped", byte_count);
                         // Update tray menu label
